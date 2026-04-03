@@ -75,6 +75,12 @@ node importPaifu.js
 PAIFU_DIR=/path/to/paifu node importPaifu.js
 ```
 
+Docker Compose を使う場合（`paifu/` はボリュームマウント済みのため、ビルド不要）:
+
+```bash
+docker compose run --rm -e IMPORT_PAIFU=1 app node index.js
+```
+
 ### 対応するゲームモード
 
 **category === 1（フレンドルーム戦）**
