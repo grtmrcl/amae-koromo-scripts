@@ -720,6 +720,10 @@ async function main() {
   if (process.env.SYNC_COUCHDB) {
     throw new Error("No longer supported");
   }
+  if (process.env.IMPORT_PAIFU) {
+    const { importPaifu } = require("./importPaifu");
+    return await importPaifu();
+  }
   if (process.env.LOAD_LOCAL_DATA) {
     return await loadLocalData(process.env.WITH_PENDING_DB?.toString() === "1");
   }
