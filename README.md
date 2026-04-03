@@ -80,7 +80,11 @@ PAIFU_DIR=/path/to/paifu node importPaifu.js
 
 | 条件 | DBサフィックス | 説明 |
 |------|--------------|------|
-| room_id あり | `_friend` | フレンドルーム対戦 |
+| accounts数=3 | `_friend3` | 三麻フレンドルーム |
+| 非標準ルール（accounts数=4） | `_friend_special` | カスタムルールのフレンドルーム |
+| 標準ルール（accounts数=4） | `_friend` | 通常フレンドルーム |
+
+標準ルールの定義: `time_fixed=5, time_add=20, dora_count=3, shiduan=1, init_point=25000, fandian=30000, bianjietishi=true, ai_level=1, fanfu=1, guyi_mode=0, open_hand=0`
 
 **category === 2（公式段位戦）**
 

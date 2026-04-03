@@ -219,6 +219,38 @@ async function withRetry(func, num = 20, retryInterval = 30000) {
   }
 }
 
+const STANDARD_DETAIL_RULE = {
+  time_fixed: 5,
+  time_add: 20,
+  dora_count: 3,
+  shiduan: 1,
+  init_point: 25000,
+  fandian: 30000,
+  bianjietishi: true,
+  ai_level: 1,
+  fanfu: 1,
+  guyi_mode: 0,
+  open_hand: 0,
+};
+
+function isStandardDetailRule(detailRule) {
+  if (!detailRule) return false;
+  return Object.keys(STANDARD_DETAIL_RULE).every(
+    (k) => JSON.stringify(detailRule[k]) === JSON.stringify(STANDARD_DETAIL_RULE[k])
+  );
+}
+
+function getStoreForFriend(groups, gameData) {
+  if (gameData.accounts.length === 3) {
+    return groups.friend3.store;
+  }
+  const detailRule = gameData.config.mode && gameData.config.mode.detail_rule;
+  if (!isStandardDetailRule(detailRule)) {
+    return groups.friendSpecial.store;
+  }
+  return groups.friend.store;
+}
+
 function getStoreForModeId(groups, modeId) {
   if ([12, 16].includes(modeId)) return groups.normal.store;
   if ([9].includes(modeId)) return groups.gold.store;
@@ -236,6 +268,8 @@ async function importPaifu() {
     e4: { store: new CouchStorage({ suffix: "_e4" }) },
     e3: { store: new CouchStorage({ suffix: "_e3" }) },
     friend: { store: new CouchStorage({ suffix: "_friend" }) },
+    friend3: { store: new CouchStorage({ suffix: "_friend3" }) },
+    friendSpecial: { store: new CouchStorage({ suffix: "_friend_special" }) },
   };
 
   const files = fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
@@ -269,8 +303,8 @@ async function importPaifu() {
 
     let itemStore;
     if (category === 1) {
-      // フレンドルーム戦: room_id を持ち mode_id は存在しない
-      itemStore = groups.friend.store;
+      // フレンドルーム戦: accounts数とdetail_ruleで細分化
+      itemStore = getStoreForFriend(groups, gameData);
     } else {
       const modeId = gameData.config.meta.mode_id;
       itemStore = getStoreForModeId(groups, modeId);
@@ -317,7 +351,7 @@ async function importPaifu() {
   console.log("importPaifu completed");
 }
 
-module.exports = { importPaifu, buildRecordDataFromJson };
+module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend };
 
 if (require.main === module) {
   importPaifu().catch((e) => {
