@@ -6,8 +6,8 @@ const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend } = req
 
 const PAIFU_DIR = path.join(__dirname, "../paifu");
 
-const NEW_FORMAT_FILE = path.join(PAIFU_DIR, "231119-3df5594f-7191-4d77-a67e-134204cc0b57.json");
-const OLD_FORMAT_FILE = path.join(PAIFU_DIR, "200410-392f14ec-7894-4f9c-9461-442347b61771.json");
+const NEW_FORMAT_FILE = path.join(PAIFU_DIR, "230520-ae4fa20c-b7a0-4c77-a79d-905b2f5eb9ef.json");
+const OLD_FORMAT_FILE = path.join(PAIFU_DIR, "200411-bfad3680-829e-4cd9-8d7d-a6882c0850e4.json");
 
 function loadPaifu(filePath) {
   const parsed = JSON.parse(fs.readFileSync(filePath, { encoding: "utf-8" }));
@@ -23,9 +23,9 @@ describe("buildRecordDataFromJson", () => {
       // When: ラウンドデータを生成する
       const rounds = buildRecordDataFromJson({ data, game });
 
-      // Then: null でなく、8局分のラウンドデータが返る
+      // Then: null でなく、14局分のラウンドデータが返る
       expect(rounds).not.toBeNull();
-      expect(rounds).toHaveLength(8);
+      expect(rounds).toHaveLength(14);
     });
 
     test("各ラウンドに4人分のシートデータが含まれる", () => {
@@ -75,15 +75,15 @@ describe("buildRecordDataFromJson", () => {
 
   describe("旧形式（records配列）のpaifu JSONからラウンドデータを生成できる", () => {
     test("ラウンド数が正しく生成される", () => {
-      // Given: records配列を持つ旧形式 paifu（12局分を含む）
+      // Given: records配列を持つ旧形式 paifu（11局分を含む）
       const { game, data } = loadPaifu(OLD_FORMAT_FILE);
 
       // When: ラウンドデータを生成する
       const rounds = buildRecordDataFromJson({ data, game });
 
-      // Then: null でなく、12局分のラウンドデータが返る
+      // Then: null でなく、11局分のラウンドデータが返る
       expect(rounds).not.toBeNull();
-      expect(rounds).toHaveLength(12);
+      expect(rounds).toHaveLength(11);
     });
 
     test("各ラウンドに4人分のシートデータが含まれる", () => {

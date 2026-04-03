@@ -9,6 +9,7 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/data
+      - ./paifu:/app/paifu
     restart: unless-stopped
 
   couchdb:
