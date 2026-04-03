@@ -15,6 +15,9 @@ RUN npm ci --omit=dev --legacy-peer-deps --ignore-scripts
 
 COPY . .
 
+# env.js が存在しない場合は env.js.example からコピー
+RUN [ -f env.js ] || cp env.js.example env.js
+
 ENV NODE_ENV=production
 
 CMD ["node", "index.js"]
