@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y \
 
 COPY package*.json ./
 
-RUN pip config set global.index-url https://pypi.flatt.tech/simple/
 RUN npm ci --omit=dev --legacy-peer-deps
 
 COPY . .
