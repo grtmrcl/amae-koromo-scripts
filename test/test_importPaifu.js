@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { buildRecordDataFromJson } = require("../importPaifu");
+const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend } = require("../importPaifu");
 
 const PAIFU_DIR = path.join(__dirname, "../paifu");
 
@@ -192,6 +192,150 @@ describe("buildRecordDataFromJson", () => {
 
       // Then: レコードが空なので null が返る
       expect(rounds).toBeNull();
+    });
+  });
+});
+
+const STANDARD_RULE = {
+  time_fixed: 5,
+  time_add: 20,
+  dora_count: 3,
+  shiduan: 1,
+  init_point: 25000,
+  fandian: 30000,
+  bianjietishi: true,
+  ai_level: 1,
+  fanfu: 1,
+  guyi_mode: 0,
+  open_hand: 0,
+};
+
+describe("isStandardDetailRule", () => {
+  test("標準ルールと完全一致する場合はtrueを返す", () => {
+    expect(isStandardDetailRule({ ...STANDARD_RULE })).toBe(true);
+  });
+
+  test("余分なキーがあってもtrueを返す", () => {
+    // 実際のpaifuには標準キー以外のフィールドが追加されている場合がある
+    expect(isStandardDetailRule({ ...STANDARD_RULE, extra_key: 99 })).toBe(true);
+  });
+
+  test("標準ルールのいずれかのキーが異なる場合はfalseを返す", () => {
+    expect(isStandardDetailRule({ ...STANDARD_RULE, dora_count: 4 })).toBe(false);
+  });
+
+  test("キーが不足している場合はfalseを返す", () => {
+    const { open_hand, ...noOpenHand } = STANDARD_RULE;
+    expect(isStandardDetailRule(noOpenHand)).toBe(false);
+  });
+
+  test("nullの場合はfalseを返す", () => {
+    expect(isStandardDetailRule(null)).toBe(false);
+  });
+});
+
+describe("getStoreForFriend", () => {
+  function makeGroups() {
+    return {
+      friend: { store: "friend_store" },
+      friend3: { store: "friend3_store" },
+      friendSpecial: { store: "friendSpecial_store" },
+    };
+  }
+
+  test("accounts.length===3のゲームはfriend3ストアに振り分けられる", () => {
+    // Given: 3人打ちフレンドルーム
+    const gameData = {
+      accounts: [{}, {}, {}],
+      config: { mode: { detail_rule: { ...STANDARD_RULE } } },
+    };
+
+    // When
+    const store = getStoreForFriend(makeGroups(), gameData);
+
+    // Then
+    expect(store).toBe("friend3_store");
+  });
+
+  test("accounts.length===3はdetail_ruleに関わらずfriend3になる", () => {
+    // Given: 3人打ちで非標準ルール
+    const gameData = {
+      accounts: [{}, {}, {}],
+      config: { mode: { detail_rule: { ...STANDARD_RULE, dora_count: 4 } } },
+    };
+
+    const store = getStoreForFriend(makeGroups(), gameData);
+
+    expect(store).toBe("friend3_store");
+  });
+
+  test("4人打ちで非標準ルールのゲームはfriendSpecialストアに振り分けられる", () => {
+    // Given: 4人打ちでdora_countが異なる非標準ルール
+    const gameData = {
+      accounts: [{}, {}, {}, {}],
+      config: { mode: { detail_rule: { ...STANDARD_RULE, dora_count: 4 } } },
+    };
+
+    const store = getStoreForFriend(makeGroups(), gameData);
+
+    expect(store).toBe("friendSpecial_store");
+  });
+
+  test("4人打ちで標準ルールのゲームはfriendストアに振り分けられる", () => {
+    // Given: 4人打ちで標準ルール
+    const gameData = {
+      accounts: [{}, {}, {}, {}],
+      config: { mode: { detail_rule: { ...STANDARD_RULE } } },
+    };
+
+    const store = getStoreForFriend(makeGroups(), gameData);
+
+    expect(store).toBe("friend_store");
+  });
+});
+
+describe("isTargetGame", () => {
+  const accounts = (ids) => ids.map((id) => ({ account_id: id }));
+
+  describe("TARGET_ACCOUNT_IDSが未設定の場合", () => {
+    let isTargetGame;
+    beforeAll(() => {
+      delete process.env.TARGET_ACCOUNT_IDS;
+      jest.resetModules();
+      ({ isTargetGame } = require("../importPaifu"));
+    });
+
+    test("全てのゲームがtrueを返す", () => {
+      expect(isTargetGame({ accounts: accounts([1, 2, 3, 4]) })).toBe(true);
+    });
+  });
+
+  describe("TARGET_ACCOUNT_IDSが設定されている場合", () => {
+    let isTargetGame;
+    beforeAll(() => {
+      process.env.TARGET_ACCOUNT_IDS = "10,20,30,40";
+      jest.resetModules();
+      ({ isTargetGame } = require("../importPaifu"));
+    });
+    afterAll(() => {
+      delete process.env.TARGET_ACCOUNT_IDS;
+    });
+
+    test("全参加者がTARGET_ACCOUNT_IDSに含まれる場合はtrueを返す", () => {
+      expect(isTargetGame({ accounts: accounts([10, 20, 30, 40]) })).toBe(true);
+    });
+
+    test("参加者の一部がTARGET_ACCOUNT_IDSに含まれない場合はfalseを返す", () => {
+      expect(isTargetGame({ accounts: accounts([10, 20, 30, 99]) })).toBe(false);
+    });
+
+    test("全参加者がTARGET_ACCOUNT_IDSに含まれない場合はfalseを返す", () => {
+      expect(isTargetGame({ accounts: accounts([91, 92, 93, 94]) })).toBe(false);
+    });
+
+    test("TARGET_ACCOUNT_IDSの部分集合でもtrueを返す", () => {
+      // Given: 3人打ちで全員がTARGET_ACCOUNT_IDSに含まれる
+      expect(isTargetGame({ accounts: accounts([10, 20, 30]) })).toBe(true);
     });
   });
 });
