@@ -5,7 +5,13 @@
   "main": "index.js",
   "scripts": {
     "watch": "tsc --watch -p tsconfig.tsc.json",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node_modules/.bin/jest"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/test/test_*.js"
+    ]
   },
   "author": "",
   "license": "Apache-2.0",
@@ -30,6 +36,7 @@
     "express": "^4.17.1",
     "express-async-router": "^0.1.15",
     "express-rate-limit": "^5.1.3",
+    "fast-json-stable-stringify": "^2.1.0",
     "fetch-cookie": "^0.7.3",
     "http-parser-js": "^0.5.6",
     "https-proxy-agent": "^5.0.0",
@@ -68,6 +75,7 @@
     "@types/node": "^16.18.26",
     "@types/proper-lockfile": "^4.1.2",
     "eslint": "^7.32.0",
+    "jest": "^30.3.0",
     "prettier": "^2.4.1",
     "regenerator-runtime": "^0.13.9",
     "ts-node": "^10.4.0",

@@ -53,7 +53,33 @@ node index.js
 | スクリプト | 説明 |
 |-----------|------|
 | `index.js` | メインエントリーポイント（ライブデータ取得・処理） |
+| `importPaifu.js` | ローカルの `paifu/*.json` をCouchDBに取り込む |
 | `extApi.js` | 外部向けAPIサーバー |
 | `logGames.js` | ゲームログの取得 |
 | `compactDaemon.js` | CouchDB compact処理デーモン |
 | `cacheStatsProcessor.js` | 統計キャッシュ処理 |
+
+## paifu JSONのインポート
+
+`paifu/` ディレクトリに配置した `YYMMDD-<UUID>.json` ファイルをCouchDBに一括取り込みます。
+
+```bash
+# paifu/ ディレクトリのJSONをインポート
+IMPORT_PAIFU=1 node index.js
+
+# またはスクリプト直接実行
+node importPaifu.js
+
+# カスタムディレクトリを指定する場合
+PAIFU_DIR=/path/to/paifu node importPaifu.js
+```
+
+### 対応するゲームモード（`config.category === 2` のみ）
+
+| mode_id | DBサフィックス | 説明 |
+|---------|--------------|------|
+| 12, 16 | （なし） | 通常段位戦 |
+| 9 | `_gold` | 金の間 |
+| 22, 24, 26 | `_sanma` | 三麻 |
+| 15, 11, 8 | `_e4` | 四麻段位戦（上位） |
+| 25, 23, 21 | `_e3` | 三麻段位戦（上位） |
