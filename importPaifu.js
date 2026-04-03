@@ -272,14 +272,14 @@ function getStoreForModeId(groups, modeId) {
 
 async function importPaifu() {
   const groups = {
-    normal: { store: new CouchStorage() },
-    gold: { store: new CouchStorage({ suffix: "_gold" }) },
-    sanma: { store: new CouchStorage({ suffix: "_sanma" }) },
-    e4: { store: new CouchStorage({ suffix: "_e4" }) },
-    e3: { store: new CouchStorage({ suffix: "_e3" }) },
-    friend: { store: new CouchStorage({ suffix: "_friend" }) },
-    friend3: { store: new CouchStorage({ suffix: "_friend3" }) },
-    friendSpecial: { store: new CouchStorage({ suffix: "_friend_special" }) },
+    normal: { store: new CouchStorage({ skipSetup: false }) },
+    gold: { store: new CouchStorage({ suffix: "_gold", skipSetup: false }) },
+    sanma: { store: new CouchStorage({ suffix: "_sanma", skipSetup: false }) },
+    e4: { store: new CouchStorage({ suffix: "_e4", skipSetup: false }) },
+    e3: { store: new CouchStorage({ suffix: "_e3", skipSetup: false }) },
+    friend: { store: new CouchStorage({ suffix: "_friend", skipSetup: false }) },
+    friend3: { store: new CouchStorage({ suffix: "_friend3", skipSetup: false }) },
+    friendSpecial: { store: new CouchStorage({ suffix: "_friend_special", skipSetup: false }) },
   };
 
   const files = fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
