@@ -261,22 +261,8 @@ function getStoreForFriend(groups, gameData) {
   return groups.friend.store;
 }
 
-function getStoreForModeId(groups, modeId) {
-  if ([12, 16].includes(modeId)) return groups.normal.store;
-  if ([9].includes(modeId)) return groups.gold.store;
-  if ([22, 24, 26].includes(modeId)) return groups.sanma.store;
-  if ([15, 11, 8].includes(modeId)) return groups.e4.store;
-  if ([25, 23, 21].includes(modeId)) return groups.e3.store;
-  return null;
-}
-
 async function importPaifu() {
   const groups = {
-    normal: { store: new CouchStorage({ skipSetup: false }) },
-    gold: { store: new CouchStorage({ suffix: "_gold", skipSetup: false }) },
-    sanma: { store: new CouchStorage({ suffix: "_sanma", skipSetup: false }) },
-    e4: { store: new CouchStorage({ suffix: "_e4", skipSetup: false }) },
-    e3: { store: new CouchStorage({ suffix: "_e3", skipSetup: false }) },
     friend: { store: new CouchStorage({ suffix: "_friend", skipSetup: false }) },
     friend3: { store: new CouchStorage({ suffix: "_friend3", skipSetup: false }) },
     friendSpecial: { store: new CouchStorage({ suffix: "_friend_special", skipSetup: false }) },
@@ -310,24 +296,13 @@ async function importPaifu() {
       continue;
     }
 
-    // category === 1（フレンドルーム戦）または category === 2（公式段位戦）以外はスキップ
+    // category === 1（フレンドルーム戦）のみ取り込み対象
     const category = gameData.config.category;
-    if (category !== 1 && category !== 2) {
+    if (category !== 1) {
       continue;
     }
 
-    let itemStore;
-    if (category === 1) {
-      // フレンドルーム戦: accounts数とdetail_ruleで細分化
-      itemStore = getStoreForFriend(groups, gameData);
-    } else {
-      const modeId = gameData.config.meta.mode_id;
-      itemStore = getStoreForModeId(groups, modeId);
-      if (!itemStore) {
-        console.log(`Unknown mode ${modeId}, skipping ${file}`);
-        continue;
-      }
-    }
+    const itemStore = getStoreForFriend(groups, gameData);
 
     const uuid = gameData.uuid;
 

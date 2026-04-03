@@ -93,12 +93,3 @@ docker compose run --rm -e IMPORT_PAIFU=1 app node index.js
 
 標準ルールの定義: `time_fixed=5, time_add=20, dora_count=3, shiduan=1, init_point=25000, fandian=30000, bianjietishi=true, ai_level=1, fanfu=1, guyi_mode=0, open_hand=0`
 
-**category === 2（公式段位戦）**
-
-| mode_id | DBサフィックス | 説明 |
-|---------|--------------|------|
-| 12, 16 | （なし） | 通常段位戦 |
-| 9 | `_gold` | 金の間 |
-| 22, 24, 26 | `_sanma` | 三麻 |
-| 15, 11, 8 | `_e4` | 四麻段位戦（上位） |
-| 25, 23, 21 | `_e3` | 三麻段位戦（上位） |
