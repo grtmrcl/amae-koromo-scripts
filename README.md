@@ -74,7 +74,15 @@ node importPaifu.js
 PAIFU_DIR=/path/to/paifu node importPaifu.js
 ```
 
-### 対応するゲームモード（`config.category === 2` のみ）
+### 対応するゲームモード
+
+**category === 1（フレンドルーム戦）**
+
+| 条件 | DBサフィックス | 説明 |
+|------|--------------|------|
+| room_id あり | `_friend` | フレンドルーム対戦 |
+
+**category === 2（公式段位戦）**
 
 | mode_id | DBサフィックス | 説明 |
 |---------|--------------|------|

@@ -235,6 +235,7 @@ async function importPaifu() {
     sanma: { store: new CouchStorage({ suffix: "_sanma" }) },
     e4: { store: new CouchStorage({ suffix: "_e4" }) },
     e3: { store: new CouchStorage({ suffix: "_e3" }) },
+    friend: { store: new CouchStorage({ suffix: "_friend" }) },
   };
 
   const files = fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
@@ -260,16 +261,23 @@ async function importPaifu() {
       continue;
     }
 
-    // category !== 2 のゲーム（オンライン公式対局以外）はスキップ
-    if (gameData.config.category !== 2) {
+    // category === 1（フレンドルーム戦）または category === 2（公式段位戦）以外はスキップ
+    const category = gameData.config.category;
+    if (category !== 1 && category !== 2) {
       continue;
     }
 
-    const modeId = gameData.config.meta.mode_id;
-    const itemStore = getStoreForModeId(groups, modeId);
-    if (!itemStore) {
-      console.log(`Unknown mode ${modeId}, skipping ${file}`);
-      continue;
+    let itemStore;
+    if (category === 1) {
+      // フレンドルーム戦: room_id を持ち mode_id は存在しない
+      itemStore = groups.friend.store;
+    } else {
+      const modeId = gameData.config.meta.mode_id;
+      itemStore = getStoreForModeId(groups, modeId);
+      if (!itemStore) {
+        console.log(`Unknown mode ${modeId}, skipping ${file}`);
+        continue;
+      }
     }
 
     const uuid = gameData.uuid;
