@@ -293,3 +293,49 @@ describe("getStoreForFriend", () => {
     expect(store).toBe("friend_store");
   });
 });
+
+describe("isTargetGame", () => {
+  const accounts = (ids) => ids.map((id) => ({ account_id: id }));
+
+  describe("TARGET_ACCOUNT_IDSが未設定の場合", () => {
+    let isTargetGame;
+    beforeAll(() => {
+      delete process.env.TARGET_ACCOUNT_IDS;
+      jest.resetModules();
+      ({ isTargetGame } = require("../importPaifu"));
+    });
+
+    test("全てのゲームがtrueを返す", () => {
+      expect(isTargetGame({ accounts: accounts([1, 2, 3, 4]) })).toBe(true);
+    });
+  });
+
+  describe("TARGET_ACCOUNT_IDSが設定されている場合", () => {
+    let isTargetGame;
+    beforeAll(() => {
+      process.env.TARGET_ACCOUNT_IDS = "10,20,30,40";
+      jest.resetModules();
+      ({ isTargetGame } = require("../importPaifu"));
+    });
+    afterAll(() => {
+      delete process.env.TARGET_ACCOUNT_IDS;
+    });
+
+    test("全参加者がTARGET_ACCOUNT_IDSに含まれる場合はtrueを返す", () => {
+      expect(isTargetGame({ accounts: accounts([10, 20, 30, 40]) })).toBe(true);
+    });
+
+    test("参加者の一部がTARGET_ACCOUNT_IDSに含まれない場合はfalseを返す", () => {
+      expect(isTargetGame({ accounts: accounts([10, 20, 30, 99]) })).toBe(false);
+    });
+
+    test("全参加者がTARGET_ACCOUNT_IDSに含まれない場合はfalseを返す", () => {
+      expect(isTargetGame({ accounts: accounts([91, 92, 93, 94]) })).toBe(false);
+    });
+
+    test("TARGET_ACCOUNT_IDSの部分集合でもtrueを返す", () => {
+      // Given: 3人打ちで全員がTARGET_ACCOUNT_IDSに含まれる
+      expect(isTargetGame({ accounts: accounts([10, 20, 30]) })).toBe(true);
+    });
+  });
+});

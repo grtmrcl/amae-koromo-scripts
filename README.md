@@ -47,6 +47,7 @@ node index.js
 | `REDIS_PASSWORD` | Redisのパスワード | - |
 | `PLAYER_SERVERS` | プレイヤーDBサーバーのJSON | - |
 | `PORT` | APIサーバーのポート | `3000` |
+| `TARGET_ACCOUNT_IDS` | 取り込み対象のaccount_idをカンマ区切りで指定。全参加者が含まれるゲームのみ登録される。未設定の場合は全ゲームを対象とする | - |
 
 ## 主なスクリプト
 

@@ -13,6 +13,16 @@ CouchStorage.DEFAULT_MODE = MODE_GAME;
 
 const PAIFU_DIR = process.env.PAIFU_DIR || path.join(__dirname, "paifu");
 
+// TARGET_ACCOUNT_IDS が設定されている場合、全参加者がその中に含まれるゲームのみ登録する
+const TARGET_ACCOUNT_IDS = process.env.TARGET_ACCOUNT_IDS
+  ? new Set(process.env.TARGET_ACCOUNT_IDS.split(",").map((id) => Number(id.trim())))
+  : null;
+
+function isTargetGame(gameData) {
+  if (!TARGET_ACCOUNT_IDS) return true;
+  return gameData.accounts.every((account) => TARGET_ACCOUNT_IDS.has(account.account_id));
+}
+
 // paifu/*.json の data フィールド（デコード済みJSON）からラウンドデータを生成する
 // index.js の buildRecordData に相当するが、Protobuf バイナリではなく JSON オブジェクトを受け取る
 function buildRecordDataFromJson({ data, game }) {
@@ -295,6 +305,11 @@ async function importPaifu() {
       continue;
     }
 
+    // 全参加者が TARGET_ACCOUNT_IDS に含まれないゲームはスキップ
+    if (!isTargetGame(gameData)) {
+      continue;
+    }
+
     // category === 1（フレンドルーム戦）または category === 2（公式段位戦）以外はスキップ
     const category = gameData.config.category;
     if (category !== 1 && category !== 2) {
@@ -351,7 +366,7 @@ async function importPaifu() {
   console.log("importPaifu completed");
 }
 
-module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend };
+module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, isTargetGame };
 
 if (require.main === module) {
   importPaifu().catch((e) => {
