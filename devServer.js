@@ -159,8 +159,9 @@ router.get("/v2/:type/player_stats/:playerId/:startDate/:endDate", async (req, r
     ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
     : typeConf;
 
-  const startMs = parseInt(req.params.startDate, 10);
-  const endMs = parseInt(req.params.endDate, 10);
+  let startMs = parseInt(req.params.startDate, 10);
+  let endMs = parseInt(req.params.endDate, 10);
+  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
   const startTimeSec = Math.floor(startMs / 1000);
   const endTimeSec = Math.ceil(endMs / 1000);
 
@@ -213,8 +214,9 @@ router.get("/v2/:type/player_records/:playerId/:startDate/:endDate", async (req,
     ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
     : typeConf;
 
-  const startMs = parseInt(req.params.startDate, 10);
-  const endMs = parseInt(req.params.endDate, 10);
+  let startMs = parseInt(req.params.startDate, 10);
+  let endMs = parseInt(req.params.endDate, 10);
+  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
   const startTimeSec = Math.floor(startMs / 1000);
   const endTimeSec = Math.ceil(endMs / 1000);
 
