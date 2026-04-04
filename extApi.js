@@ -107,6 +107,14 @@ function generateKey(date) {
   uuid = uuid.replace(/#/g, msTime % 1000 < 500 ? "0" : "f");
   return `"${generateCompressedId(uuid, Math.floor(msTime / 1000))}"`;
 }
+function getDbModeKey(dbName) {
+  // "majsoul_basic" -> "_", "majsoul_gold_basic" -> "_gold",
+  // "majsoul_friend_special_basic" -> "_friend_special"
+  const m = /^majsoul((?:_[^_]+)*)_basic$/.exec(dbName);
+  if (!m) return null;
+  return m[1] || "_";
+}
+
 async function main() {
   console.log("Fetching design docs...");
   const render = await createRenderer();
@@ -141,9 +149,19 @@ async function main() {
   };
   const MODE_DBS = {};
   Object.keys(TYPES).forEach((t) => TYPES[t].modes.forEach((mode) => (MODE_DBS[mode] = TYPES[t].mainDb)));
+  // 友人戦用の人工モードID (1=4人標準, 2=4人特殊, 3=3人)
+  const FRIEND_MODE_DBS = {
+    1: "majsoul_friend_basic",
+    2: "majsoul_friend_special_basic",
+    3: "majsoul_friend3_basic",
+  };
+  Object.assign(MODE_DBS, FRIEND_MODE_DBS);
+  const FRIEND_MODES = new Set([1, 2, 3]);
   const V2_TYPES = {
     pl4: { modes: [9, 12, 16, 8, 11, 15] },
     pl3: { modes: [22, 24, 26, 21, 23, 25] },
+    pl_friend: { modes: [1, 2] },
+    pl_friend3: { modes: [3] },
   };
   const VIEWS = {
     player_stats: {
@@ -201,6 +219,8 @@ async function main() {
       db: {
         pl4: "majsoul_aggregates",
         pl3: "majsoul_sanma_aggregates",
+        pl_friend: "majsoul_friend_aggregates",
+        pl_friend3: "majsoul_friend3_aggregates",
       },
       path: "global_statistics",
       renderer: "global_statistics",
@@ -209,6 +229,8 @@ async function main() {
       db: {
         pl4: "majsoul_aggregates",
         pl3: "majsoul_sanma_aggregates",
+        pl_friend: "majsoul_friend_aggregates",
+        pl_friend3: "majsoul_friend3_aggregates",
       },
       path: "global_statistics",
       renderer: "global_statistics",
@@ -217,6 +239,8 @@ async function main() {
       db: {
         pl4: "majsoul_aggregates",
         pl3: "majsoul_sanma_aggregates",
+        pl_friend: "majsoul_friend_aggregates",
+        pl_friend3: "majsoul_friend3_aggregates",
       },
       path: (subView) => `player_delta_ranking_${subView}`,
       renderer: "generic_data",
@@ -225,6 +249,8 @@ async function main() {
       db: {
         pl4: "majsoul_aggregates",
         pl3: "majsoul_sanma_aggregates",
+        pl_friend: "majsoul_friend_aggregates",
+        pl_friend3: "majsoul_friend3_aggregates",
       },
       path: "global_histogram",
       renderer: "generic_data",
@@ -233,13 +259,25 @@ async function main() {
       db: {
         pl4: "majsoul_aggregates",
         pl3: "majsoul_sanma_aggregates",
+        pl_friend: "majsoul_friend_aggregates",
+        pl_friend3: "majsoul_friend3_aggregates",
       },
       path: (subView) => `career_ranking_${encodeURIComponent(subView)}`,
       renderer: "career_ranking",
     },
   };
   router.get("/v2/:type/games/:startDate/:endDate", async function (req, res) {
+    if (!V2_TYPES[req.params.type]) {
+      return res.status(404).json({
+        error: "type_not_found",
+      });
+    }
     if (!MODE_DBS[req.query.mode]) {
+      return res.status(404).json({
+        error: "mode_not_found",
+      });
+    }
+    if (!V2_TYPES[req.params.type].modes.includes(parseInt(req.query.mode, 10))) {
       return res.status(404).json({
         error: "mode_not_found",
       });
@@ -286,13 +324,14 @@ async function main() {
     if (limit > 500) {
       limit = 500;
     }
+    const modeId = parseInt(req.query.mode, 10);
+    const isFriendMode = FRIEND_MODES.has(modeId);
+    // 友人戦DBはDB自体で種別が分かれているためmode_idフィルタ不要
     const params = {
-      use_index: "mode_games",
+      use_index: isFriendMode ? "start_time" : "mode_games",
       selector: {
         $and: [
-          {
-            "config.meta.mode_id": parseInt(req.query.mode, 10),
-          },
+          ...(isFriendMode ? [] : [{ "config.meta.mode_id": modeId }]),
           {
             start_time: { $gte: Math.floor(startDate / 1000) },
           },
@@ -557,6 +596,11 @@ async function main() {
     }
   );
   router.get("/v2/:type/level_statistics", async function (req, res) {
+    if (req.params.type === "pl_friend" || req.params.type === "pl_friend3") {
+      // 友人戦には段位制度がない
+      res.type("json").set({ "Cache-Control": "public, max-age=86400, stale-while-revalidate=86400, stale-if-error=86400" });
+      return res.json([]).end();
+    }
     const base = req.params.type === "pl3" ? 2 : 1;
     const resp = await withRetry(
       () =>
@@ -583,6 +627,11 @@ async function main() {
     if (!MODE_DBS[req.query.mode]) {
       return res.status(404).json({
         error: "mode_not_found",
+      });
+    }
+    if (FRIEND_MODES.has(parseInt(req.query.mode, 10))) {
+      return res.status(404).json({
+        error: "not_supported_for_friend_mode",
       });
     }
     if (req.query.skip) {
@@ -816,14 +865,14 @@ async function main() {
   router.get(["/v2/:type/search_player/:keyword", "/:type/search_player/:keyword"], async function (req, res) {
     const modeKeys = new Set();
     if (TYPES[req.params.type]) {
-      const m = /^majsoul(_[^_]+)?_basic$/.exec(TYPES[req.params.type].mainDb);
-      assert(m);
-      modeKeys.add(m[1] || "_");
+      const key = getDbModeKey(TYPES[req.params.type].mainDb);
+      assert(key);
+      modeKeys.add(key);
     } else if (V2_TYPES[req.params.type]) {
       for (const mode of V2_TYPES[req.params.type].modes) {
-        const m = /^majsoul(_[^_]+)?_basic$/.exec(MODE_DBS[mode]);
-        assert(m);
-        modeKeys.add(m[1] || "_");
+        const key = getDbModeKey(MODE_DBS[mode]);
+        assert(key);
+        modeKeys.add(key);
       }
     } else {
       return res.status(404).json({
@@ -878,11 +927,9 @@ async function main() {
         return {
           id: parseInt(/^0*([1-9]\d+)$/.exec(item._id), 10),
           nickname: item.nickname,
-          level: {
-            id: mode.level[0],
-            score: mode.level[1],
-            delta: mode.level[2],
-          },
+          level: mode.level
+            ? { id: mode.level[0], score: mode.level[1], delta: mode.level[2] }
+            : null,
           latest_timestamp: mode.timestamp,
         };
       })
@@ -1211,4 +1258,5 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+module.exports = { getDbModeKey };
 // vim: sw=2:ts=2:expandtab:fdm=syntax

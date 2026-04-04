@@ -288,6 +288,21 @@ async function main() {
       stateServer: PLAYER_SERVERS[25],
       logTag: "[E3]",
     },
+    friend: {
+      dbSuffix: "_friend",
+      stateServer: PLAYER_SERVERS[1],
+      logTag: "[F4]",
+    },
+    friend_special: {
+      dbSuffix: "_friend_special",
+      stateServer: PLAYER_SERVERS[2],
+      logTag: "[FS]",
+    },
+    friend3: {
+      dbSuffix: "_friend3",
+      stateServer: PLAYER_SERVERS[3],
+      logTag: "[F3]",
+    },
   };
   if (process.env.SINGLE_SOURCE) {
     assert(settings[process.env.SINGLE_SOURCE]);

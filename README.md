@@ -25,7 +25,20 @@ cp env.js.example env.js
 docker compose up -d
 ```
 
-### ローカル開発
+### ローカル開発（amae-koromo フロントエンドとの疎通確認）
+
+CouchDB不要のスタブAPIサーバーを使うことで、amae-koromoフロントエンドからのAPIリクエストを受け付けられます。
+
+```bash
+npm install
+npm run dev
+# または
+node devServer.js
+```
+
+ポート3000でサーバーが起動します。amae-koromoをローカル開発環境で起動すると `http://localhost:3000/api-test/v2/pl_friend/` に向けてリクエストが送られ、スタブサーバーが空のレスポンスを返します。
+
+### ローカル開発（CouchDB有り）
 
 ```bash
 npm install
@@ -55,7 +68,8 @@ node index.js
 |-----------|------|
 | `index.js` | メインエントリーポイント（ライブデータ取得・処理） |
 | `importPaifu.js` | ローカルの `paifu/*.json` をCouchDBに取り込む |
-| `extApi.js` | 外部向けAPIサーバー |
+| `extApi.js` | 外部向けAPIサーバー（CouchDB必須） |
+| `devServer.js` | ローカル開発用スタブAPIサーバー（CouchDB不要） |
 | `logGames.js` | ゲームログの取得 |
 | `compactDaemon.js` | CouchDB compact処理デーモン |
 | `cacheStatsProcessor.js` | 統計キャッシュ処理 |
