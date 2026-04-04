@@ -208,7 +208,7 @@ router.get("/v2/:type/player_stats/:playerId/:startDate/:endDate", async (req, r
     rankCounts[rank]++;
     rankScoreSum[rank] += myResult.total_point;
     rankSum += rank + 1;
-    if (myResult.total_point < 0) negativeCount++;
+    if (myResult.part_point_1 < 0) negativeCount++;
   }
 
   const count = rankCounts.reduce((s, c) => s + c, 0);
