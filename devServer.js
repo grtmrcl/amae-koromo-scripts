@@ -191,11 +191,41 @@ router.get("/v2/:type/player_stats/:playerId/:startDate/:endDate", async (req, r
     .flatMap((doc) => doc.accounts)
     .find((a) => a.account_id === playerId)?.nickname || "";
 
+  const numPlayers = 4;
+  const rankCounts = Array(numPlayers).fill(0);
+  const rankScoreSum = Array(numPlayers).fill(0);
+  let rankSum = 0;
+  let negativeCount = 0;
+
+  for (const doc of allDocs) {
+    const players = (doc.result?.players || []).slice().sort((a, b) => b.total_point - a.total_point);
+    const myResult = (doc.result?.players || []).find(
+      (p) => (doc.accounts || []).find((a) => a.account_id === playerId)?.seat === p.seat
+    );
+    if (!myResult) continue;
+    const rank = players.findIndex((p) => p.seat === myResult.seat);
+    if (rank === -1) continue;
+    rankCounts[rank]++;
+    rankScoreSum[rank] += myResult.total_point;
+    rankSum += rank + 1;
+    if (myResult.total_point < 0) negativeCount++;
+  }
+
+  const count = rankCounts.reduce((s, c) => s + c, 0);
+  const rank_rates = rankCounts.map((c) => (count > 0 ? c / count : 0));
+  const rank_avg_score = rankCounts.map((c, i) => (c > 0 ? Math.round(rankScoreSum[i] / c) : 0));
+  const avg_rank = count > 0 ? rankSum / count : 0;
+  const negative_rate = count > 0 ? negativeCount / count : 0;
+
   return res.json({
     id: playerId,
     nickname,
-    count: allDocs.length,
+    count,
     played_modes: [...new Set(allDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m)))],
+    rank_rates,
+    rank_avg_score,
+    avg_rank,
+    negative_rate,
   });
 });
 
