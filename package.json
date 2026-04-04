@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "watch": "tsc --watch -p tsconfig.tsc.json",
-    "test": "node_modules/.bin/jest"
+    "test": "node_modules/.bin/jest",
+    "dev": "node devServer.js"
   },
   "jest": {
     "testEnvironment": "node",
