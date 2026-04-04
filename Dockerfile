@@ -20,4 +20,4 @@ RUN [ -f env.js ] || cp env.js.example env.js
 
 ENV NODE_ENV=production
 
-CMD ["node", "index.js"]
+CMD ["node", "devServer.js"]
