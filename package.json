@@ -6,7 +6,7 @@
   "scripts": {
     "watch": "tsc --watch -p tsconfig.tsc.json",
     "test": "node_modules/.bin/jest",
-    "dev": "node devServer.js"
+    "dev": "COUCHDB_SERVER=localhost:5984 node devServer.js"
   },
   "jest": {
     "testEnvironment": "node",
