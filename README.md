@@ -27,16 +27,16 @@ docker compose up -d
 
 ### ローカル開発（amae-koromo フロントエンドとの疎通確認）
 
-CouchDB不要のスタブAPIサーバーを使うことで、amae-koromoフロントエンドからのAPIリクエストを受け付けられます。
+`devServer.js` を使うことで、amae-koromoフロントエンドからのAPIリクエストを受け付け、DockerのCouchDBに格納された実データを返せます。
+事前に `docker compose up -d` でCouchDB等を起動しておく必要があります。
 
 ```bash
 npm install
 npm run dev
-# または
-node devServer.js
 ```
 
-ポート3000でサーバーが起動します。amae-koromoをローカル開発環境で起動すると `http://localhost:3000/api-test/v2/pl_friend/` に向けてリクエストが送られ、スタブサーバーが空のレスポンスを返します。
+`npm run dev` は `COUCHDB_SERVER=localhost:5984` を設定してサーバーを起動します。
+ポート3000で起動し、amae-koromoの開発環境（`http://localhost:3000/api-test/v2/pl_friend/`）からのリクエストを受け付けます。
 
 ### ローカル開発（CouchDB有り）
 
@@ -69,7 +69,7 @@ node index.js
 | `index.js` | メインエントリーポイント（ライブデータ取得・処理） |
 | `importPaifu.js` | ローカルの `paifu/*.json` をCouchDBに取り込む |
 | `extApi.js` | 外部向けAPIサーバー（CouchDB必須） |
-| `devServer.js` | ローカル開発用スタブAPIサーバー（CouchDB不要） |
+| `devServer.js` | ローカル開発用APIサーバー（CouchDBに直接アクセス） |
 | `logGames.js` | ゲームログの取得 |
 | `compactDaemon.js` | CouchDB compact処理デーモン |
 | `cacheStatsProcessor.js` | 統計キャッシュ処理 |
