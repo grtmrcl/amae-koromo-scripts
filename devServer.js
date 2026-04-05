@@ -48,7 +48,7 @@ function docToGameRecord(doc) {
     return {
       accountId: account.account_id,
       nickname: account.nickname,
-      score: resultPlayer ? resultPlayer.total_point : 0,
+      score: resultPlayer ? resultPlayer.part_point_1 : 0,
       gradingScore: resultPlayer ? resultPlayer.grading_score : 0,
     };
   });
@@ -198,7 +198,7 @@ router.get("/v2/:type/player_stats/:playerId/:startDate/:endDate", async (req, r
   let negativeCount = 0;
 
   for (const doc of allDocs) {
-    const players = (doc.result?.players || []).slice().sort((a, b) => b.total_point - a.total_point);
+    const players = (doc.result?.players || []).slice().sort((a, b) => b.part_point_1 - a.part_point_1);
     const myResult = (doc.result?.players || []).find(
       (p) => (doc.accounts || []).find((a) => a.account_id === playerId)?.seat === p.seat
     );
@@ -206,7 +206,7 @@ router.get("/v2/:type/player_stats/:playerId/:startDate/:endDate", async (req, r
     const rank = players.findIndex((p) => p.seat === myResult.seat);
     if (rank === -1) continue;
     rankCounts[rank]++;
-    rankScoreSum[rank] += myResult.total_point;
+    rankScoreSum[rank] += myResult.part_point_1;
     rankSum += rank + 1;
     if (myResult.part_point_1 < 0) negativeCount++;
   }
@@ -337,75 +337,115 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   }
 
   const playerId = parseInt(req.params.playerId, 10);
+  if (isNaN(playerId)) return res.status(400).json({ error: "invalid_player_id" });
+
   const modes = req.query.mode
     ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
     : typeConf;
 
   let startMs = parseInt(req.params.startDate, 10);
   let endMs = parseInt(req.params.endDate, 10);
+  if (isNaN(startMs) || isNaN(endMs)) return res.status(400).json({ error: "invalid_date" });
   if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
   const startTimeSec = Math.floor(startMs / 1000);
   const endTimeSec = Math.ceil(endMs / 1000);
 
   const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
 
-  // basicDB からプレイヤー・期間に一致する対局を取得
-  const basicDocs = (
-    await Promise.all(
-      dbNames.map((db) =>
-        axios
-          .post(`${COUCH_BASE}/${db}/_find`, {
-            selector: {
-              $and: [
-                { accounts: { $elemMatch: { account_id: playerId } } },
-                { start_time: { $gte: startTimeSec } },
-                { start_time: { $lt: endTimeSec } },
-              ],
-            },
-            fields: ["_id", "standard_rule"],
-            limit: 10000,
-          })
-          .then((r) => r.data.docs || [])
-          .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)))
-      )
-    )
-  ).flat();
+  // basicDB からプレイヤー・期間に一致する対局をDB別に取得
+  const basicDocsByDb = Object.fromEntries(await Promise.all(
+    dbNames.map(async (db) => {
+      const docs = await axios
+        .post(`${COUCH_BASE}/${db}/_find`, {
+          selector: {
+            $and: [
+              { accounts: { $elemMatch: { account_id: playerId } } },
+              { start_time: { $gte: startTimeSec } },
+              { start_time: { $lt: endTimeSec } },
+            ],
+          },
+          fields: ["_id", "standard_rule", "accounts", "result"],
+          limit: 10000,
+        })
+        .then((r) => r.data.docs || [])
+        .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
+      return [db, docs];
+    })
+  ));
 
+  const allBasicDocs = Object.values(basicDocsByDb).flat();
   const playedModes = [...new Set(
-    basicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
+    allBasicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
   )];
 
   // extendedDB を bulk_get で一括取得し局数を合計
   let count = 0;
-  let 和Count = 0;
-  let 自摸Count = 0;
-  let 默听Count = 0;
-  let 放铳Count = 0;
-  let 副露Count = 0;
-  let 立直Count = 0;
-  let 和点数Sum = 0;
-  let 和巡目Sum = 0;
-  let 放铳点数Sum = 0;
-  let 流局Count = 0;
-  let 流听Count = 0;
-  let 立直和了Count = 0;
-  let 副露和了Count = 0;
-  let 立直后流局Count = 0;
-  let 副露后流局Count = 0;
-  let 立直巡目Sum = 0;
-  let 立直和点数Sum = 0;
-  let 立直放铳点数Sum = 0;
-  let 立直放铳Count = 0;
-  let 一发Count = 0;
-  let 里宝Count = 0;
-  let 放铳时立直Count = 0;
-  let 放铳时副露Count = 0;
+  let winCount = 0;
+  let tsumoCount = 0;
+  let damatenCount = 0;
+  let ronCount = 0;
+  let fuuroCount = 0;
+  let richiCount = 0;
+  let winPointSum = 0;
+  let winJunSum = 0;
+  let ronPointSum = 0;
+  let ryukyokuCount = 0;
+  let ryukyokuTenpaiCount = 0;
+  let richiWinCount = 0;
+  let fuuroWinCount = 0;
+  let richiRyukyokuCount = 0;
+  let fuuroRyukyokuCount = 0;
+  let richiJunSum = 0;
+  let richiWinPointSum = 0;
+  let richiRonPointSum = 0;
+  let richiRonCount = 0;
+  let richiAfterRonCount = 0;
+  let richiAfterRonNonInstantCount = 0;
+  let fuuroAfterRonCount = 0;
+  let oyaCount = 0;
+  let bazoCount = 0;
+  let bazoPointSum = 0;
+  let maxRenchan = 0;
+  let ippatsuCount = 0;
+  let yakumanCount = 0;
+  let maxFanCount = 0;
+  let wrichiCount = 0;
+  let uraCount = 0;
+  let ronTimeRichiCount = 0;
+  let ronTimeFuuroCount = 0;
+  let ronToRichiCount = 0;
+  let ronToFuuroCount = 0;
+  let ronToDamatenCount = 0;
+  let furitenRichiCount = 0;
+  let goodShapeCount = 0;
+  let multiWaitCount = 0;
+  let goodShape2Count = 0;
+  let senteCount = 0;
+  let oiRichiCount = 0;
+  let shantenSum = 0;
+  let shantenOyaSum = 0;
+  let shantenOyaCount = 0;
+  let shantenKoSum = 0;
+  let shantenKoCount = 0;
+  let gameScoreSum = 0;
+  let gameCount = 0;
+
+  // basicDocから対局単位の収支を集計
+  for (const doc of allBasicDocs) {
+    const mySeat = (doc.accounts || []).find((a) => a.account_id === playerId)?.seat;
+    if (mySeat == null) continue;
+    const myResult = (doc.result?.players || []).find((p) => p.seat === mySeat);
+    if (!myResult || myResult.part_point_1 == null) continue;
+    gameScoreSum += myResult.part_point_1 - 25000;
+    gameCount++;
+  }
 
   // fan_idに基づく役コード定数
   const FAN_IPPATSU = 30;  // 一発
   const FAN_URA = 33;      // 裏ドラ
+  const isYakuman = (id) => (id >= 35 && id <= 50) || (id >= 59 && id <= 64);
 
-  if (basicDocs.length > 0) {
+  if (allBasicDocs.length > 0) {
     // basicDB名 -> extendedDB名のマッピング
     const extendedDbMap = Object.fromEntries(
       Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
@@ -413,8 +453,9 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
 
     await Promise.all(
       dbNames.map(async (db) => {
-        const ids = basicDocs.map((doc) => ({ id: `r-${doc._id}` }));
-        if (ids.length === 0) return;
+        const docsForDb = basicDocsByDb[db] || [];
+        if (docsForDb.length === 0) return;
+        const ids = docsForDb.map((doc) => ({ id: `r-${doc._id}` }));
         const extDb = extendedDbMap[db];
         const resp = await axios
           .post(`${COUCH_BASE}/${extDb}/_bulk_get`, { docs: ids })
@@ -424,49 +465,136 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
           if (!doc) continue;
           const seat = doc.accounts?.indexOf(playerId);
           if (seat === -1 || seat == null) continue;
+          let currentRenchan = 0;
           for (const kyoku of doc.data || []) {
             const p = kyoku[seat];
             if (!p) continue;
+            // 途中流局は集計から除外
+            if (p["途中流局"] != null) continue;
             count++;
+            const isOya = p["亲"] === true;
+            if (isOya) {
+              oyaCount++;
+              currentRenchan++;
+              if (currentRenchan > maxRenchan) maxRenchan = currentRenchan;
+              // 被炸: 他プレイヤーの自摸和了で点数8000以上
+              for (let s = 0; s < kyoku.length; s++) {
+                if (s === seat) continue;
+                const other = kyoku[s];
+                if (!other || !other["和"] || other["自摸"] !== true) continue;
+                const points = other["和"][0];
+                if (points >= 8000) {
+                  bazoCount++;
+                  bazoPointSum += points;
+                  break;
+                }
+              }
+            } else {
+              currentRenchan = 0;
+            }
+            const shanten = p["起手向听"];
+            if (shanten != null) {
+              shantenSum += shanten;
+              if (isOya) {
+                shantenOyaSum += shanten;
+                shantenOyaCount++;
+              } else {
+                shantenKoSum += shanten;
+                shantenKoCount++;
+              }
+            }
             const hasWin = p["和"] != null;
             const hasRichi = p["立直"] != null;
             const fuuro = p["副露"] || 0;
             if (hasWin) {
-              和Count++;
-              和点数Sum += p["和"][0];
-              和巡目Sum += p["和"][2];
-              if (p["自摸"] === true) 自摸Count++;
-              if (!hasRichi && !(fuuro >= 1)) 默听Count++;
+              winCount++;
+              winPointSum += p["和"][0];
+              winJunSum += p["和"][2];
+              if (p["自摸"] === true) tsumoCount++;
+              if (!hasRichi && !(fuuro >= 1)) damatenCount++;
+              const fans = p["和"][1] || [];
+              const fanCount = fans.length;
+              if (fanCount > maxFanCount) maxFanCount = fanCount;
+              if (fans.some(isYakuman)) yakumanCount++;
               if (hasRichi) {
-                立直和了Count++;
-                立直和点数Sum += p["和"][0];
-                if (p["和"][1].includes(FAN_IPPATSU)) 一发Count++;
-                if (p["和"][1].includes(FAN_URA)) 里宝Count++;
+                richiWinCount++;
+                richiWinPointSum += p["和"][0];
+                if (fans.includes(FAN_IPPATSU)) ippatsuCount++;
+                if (fans.includes(FAN_URA)) uraCount++;
               }
-              if (fuuro >= 1) 副露和了Count++;
+              if (fuuro >= 1) fuuroWinCount++;
             }
             if (p["放铳"] != null) {
-              放铳Count++;
-              放铳点数Sum += p["放铳"];
+              ronCount++;
+              ronPointSum += p["放铳"];
               if (hasRichi) {
-                立直放铳Count++;
-                立直放铳点数Sum += p["放铳"];
-                放铳时立直Count++;
+                richiRonCount++;
+                richiRonPointSum += p["放铳"];
+                ronTimeRichiCount++;
               }
-              if (fuuro >= 1) 放铳时副露Count++;
+              if (fuuro >= 1) {
+                ronTimeFuuroCount++;
+                fuuroAfterRonCount++;
+              }
+              // 放铳相手（和了プレイヤー）の状態を判定
+              const winner = kyoku.find((other, s) => s !== seat && other?.["和"] != null);
+              if (winner) {
+                const winnerHasRichi = winner["立直"] != null;
+                const winnerFuuro = winner["副露"] || 0;
+                if (winnerHasRichi) ronToRichiCount++;
+                else if (winnerFuuro >= 1) ronToFuuroCount++;
+                else ronToDamatenCount++;
+                // 立直后放铳: 自分が立直していて、自分の立直巡目 <= 相手の和了巡目
+                // 立直后非瞬间放铳: 立直打牌の次の巡以降での放銃 (立直巡目+1 <= 和了巡目)
+                if (hasRichi) {
+                  const winnerHuleJun = winner["和"][2];
+                  if (p["立直"] <= winnerHuleJun) richiAfterRonCount++;
+                  if (p["立直"] + 1 <= winnerHuleJun) richiAfterRonNonInstantCount++;
+                }
+              }
             }
-            if (fuuro >= 1) 副露Count++;
+            if (fuuro >= 1) fuuroCount++;
             if (hasRichi) {
-              立直Count++;
-              立直巡目Sum += p["立直"];
+              richiCount++;
+              richiJunSum += p["立直"];
+              if (p["振听立直"] === true) furitenRichiCount++;
+              if (p["W立直"] === true) wrichiCount++;
+              const tingpais = p["立直听牌"];
+              if (tingpais && tingpais.length >= 2) {
+                goodShapeCount++;
+                multiWaitCount++;
+              }
+              const remainingTiles = p["立直听牌残枚"];
+              if (remainingTiles != null && remainingTiles >= 6) goodShape2Count++;
+              // 先制立直判定: 局内で最も早く立直した(巡目最小、同巡はseat最小)かどうか
+              const myRichiJun = p["立直"];
+              let isSente = true;
+              for (let s = 0; s < kyoku.length; s++) {
+                if (s === seat) continue;
+                const other = kyoku[s];
+                if (!other || other["立直"] == null) continue;
+                const otherJun = other["立直"];
+                if (otherJun < myRichiJun || (otherJun === myRichiJun && s < seat)) {
+                  isSente = false;
+                  break;
+                }
+              }
+              if (isSente) senteCount++;
+              // 被追判定: 自分より後に立直した他プレイヤーが存在するか
+              const hasOiRichi = kyoku.some((other, s) => {
+                if (s === seat || !other || other["立直"] == null) return false;
+                const otherJun = other["立直"];
+                return otherJun > myRichiJun || (otherJun === myRichiJun && s > seat);
+              });
+              if (hasOiRichi) oiRichiCount++;
             }
             if (p["流听"] != null) {
-              流局Count++;
+              ryukyokuCount++;
               if (p["流听"] === true) {
-                流听Count++;
-                if (hasRichi) 立直后流局Count++;
+                ryukyokuTenpaiCount++;
+                if (hasRichi) richiRyukyokuCount++;
               }
-              if (fuuro >= 1) 副露后流局Count++;
+              if (fuuro >= 1) fuuroRyukyokuCount++;
             }
           }
         }
@@ -476,58 +604,59 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
 
   return res.json({
     count,
-    和牌率: count > 0 ? 和Count / count : 0,
-    自摸率: 和Count > 0 ? 自摸Count / 和Count : 0,
-    默听率: 和Count > 0 ? 默听Count / 和Count : 0,
-    放铳率: count > 0 ? 放铳Count / count : 0,
-    副露率: count > 0 ? 副露Count / count : 0,
-    立直率: count > 0 ? 立直Count / count : 0,
-    平均打点: 和Count > 0 ? Math.round(和点数Sum / 和Count) : 0,
-    最大连庄: 0,
-    和了巡数: 和Count > 0 ? 和巡目Sum / 和Count : 0,
-    平均铳点: 放铳Count > 0 ? Math.round(放铳点数Sum / 放铳Count) : 0,
-    流局率: count > 0 ? 流局Count / count : 0,
-    流听率: 流局Count > 0 ? 流听Count / 流局Count : 0,
-    一发率: 立直和了Count > 0 ? 一发Count / 立直和了Count : 0,
-    里宝率: 立直和了Count > 0 ? 里宝Count / 立直和了Count : 0,
-    被炸率: 0,
-    平均被炸点数: 0,
-    放铳时立直率: 放铳Count > 0 ? 放铳时立直Count / 放铳Count : 0,
-    放铳时副露率: 放铳Count > 0 ? 放铳时副露Count / 放铳Count : 0,
-    立直后放铳率: 0,
-    立直后非瞬间放铳率: 0,
-    副露后放铳率: 0,
-    立直后和牌率: 立直Count > 0 ? 立直和了Count / 立直Count : 0,
-    副露后和牌率: 副露Count > 0 ? 副露和了Count / 副露Count : 0,
-    立直后流局率: 立直Count > 0 ? 立直后流局Count / 立直Count : 0,
-    副露后流局率: 副露Count > 0 ? 副露后流局Count / 副露Count : 0,
-    放铳至立直: 0,
-    放铳至副露: 0,
-    放铳至默听: 0,
-    立直和了: 立直和了Count,
-    副露和了: 副露和了Count,
-    默听和了: 默听Count,
-    立直巡目: 立直Count > 0 ? 立直巡目Sum / 立直Count : 0,
-    立直收支: 立直Count > 0 ? Math.round((立直和点数Sum - 立直放铳点数Sum) / 立直Count) : 0,
-    立直收入: 立直和了Count > 0 ? Math.round(立直和点数Sum / 立直和了Count) : 0,
-    立直支出: 立直放铳Count > 0 ? Math.round(立直放铳点数Sum / 立直放铳Count) : 0,
-    先制率: 0,
-    追立率: 0,
-    被追率: 0,
-    振听立直率: 0,
-    立直好型: 0,
-    立直多面: 0,
-    立直好型2: 0,
-    役满: 0,
-    最大累计番数: 0,
-    W立直: 0,
-    打点效率: 0,
-    铳点损失: 0,
-    净打点效率: 0,
-    平均起手向听: 0,
-    平均起手向听亲: 0,
-    平均起手向听子: 0,
-    id: parseInt(req.params.playerId, 10),
+    和牌率: count > 0 ? winCount / count : 0,
+    自摸率: winCount > 0 ? tsumoCount / winCount : 0,
+    默听率: winCount > 0 ? damatenCount / winCount : 0,
+    放铳率: count > 0 ? ronCount / count : 0,
+    副露率: count > 0 ? fuuroCount / count : 0,
+    立直率: count > 0 ? richiCount / count : 0,
+    平均打点: winCount > 0 ? Math.round(winPointSum / winCount) : 0,
+    最大连庄: maxRenchan,
+    和了巡数: winCount > 0 ? winJunSum / winCount : 0,
+    平均铳点: ronCount > 0 ? Math.round(ronPointSum / ronCount) : 0,
+    流局率: count > 0 ? ryukyokuCount / count : 0,
+    流听率: ryukyokuCount > 0 ? ryukyokuTenpaiCount / ryukyokuCount : 0,
+    一发率: richiWinCount > 0 ? ippatsuCount / richiWinCount : 0,
+    里宝率: richiWinCount > 0 ? uraCount / richiWinCount : 0,
+    被炸率: oyaCount > 0 ? bazoCount / oyaCount : 0,
+    平均被炸点数: bazoCount > 0 ? Math.round(bazoPointSum / bazoCount) : 0,
+    放铳时立直率: ronCount > 0 ? ronTimeRichiCount / ronCount : 0,
+    放铳时副露率: ronCount > 0 ? ronTimeFuuroCount / ronCount : 0,
+    立直后放铳率: richiCount > 0 ? richiAfterRonCount / richiCount : 0,
+    立直后非瞬间放铳率: richiCount > 0 ? richiAfterRonNonInstantCount / richiCount : 0,
+    副露后放铳率: fuuroCount > 0 ? fuuroAfterRonCount / fuuroCount : 0,
+    立直后和牌率: richiCount > 0 ? richiWinCount / richiCount : 0,
+    副露后和牌率: fuuroCount > 0 ? fuuroWinCount / fuuroCount : 0,
+    立直后流局率: richiCount > 0 ? richiRyukyokuCount / richiCount : 0,
+    副露后流局率: fuuroCount > 0 ? fuuroRyukyokuCount / fuuroCount : 0,
+    放铳至立直: ronToRichiCount,
+    放铳至副露: ronToFuuroCount,
+    放铳至默听: ronToDamatenCount,
+    立直和了: richiWinCount,
+    副露和了: fuuroWinCount,
+    默听和了: damatenCount,
+    立直巡目: richiCount > 0 ? richiJunSum / richiCount : 0,
+    立直收支: richiCount > 0 ? Math.round((richiWinPointSum - richiRonPointSum) / richiCount) : 0,
+    立直收入: richiWinCount > 0 ? Math.round(richiWinPointSum / richiWinCount) : 0,
+    立直支出: richiRonCount > 0 ? Math.round(richiRonPointSum / richiRonCount) : 0,
+    先制率: richiCount > 0 ? senteCount / richiCount : 0,
+    追立率: richiCount > 0 ? 1 - senteCount / richiCount : 0,
+    被追率: richiCount > 0 ? oiRichiCount / richiCount : 0,
+    振听立直率: richiCount > 0 ? furitenRichiCount / richiCount : 0,
+    立直好型: richiCount > 0 ? goodShapeCount / richiCount : 0,
+    立直多面: richiCount > 0 ? multiWaitCount / richiCount : 0,
+    立直好型2: richiCount > 0 ? goodShape2Count / richiCount : 0,
+    役满: yakumanCount,
+    最大累计番数: maxFanCount,
+    W立直: wrichiCount,
+    打点效率: count > 0 ? Math.round(winCount / count * (winCount > 0 ? winPointSum / winCount : 0)) : 0,
+    铳点损失: count > 0 ? Math.round(ronCount / count * (ronCount > 0 ? ronPointSum / ronCount : 0)) : 0,
+    净打点效率: count > 0 ? Math.round(winCount / count * (winCount > 0 ? winPointSum / winCount : 0) - ronCount / count * (ronCount > 0 ? ronPointSum / ronCount : 0)) : 0,
+    局収支: gameCount > 0 ? Math.round(gameScoreSum / count) : 0,
+    平均起手向听: shantenOyaCount + shantenKoCount > 0 ? shantenSum / (shantenOyaCount + shantenKoCount) : 0,
+    平均起手向听亲: shantenOyaCount > 0 ? shantenOyaSum / shantenOyaCount : 0,
+    平均起手向听子: shantenKoCount > 0 ? shantenKoSum / shantenKoCount : 0,
+    account_id: playerId,
     played_modes: playedModes,
   });
 });
