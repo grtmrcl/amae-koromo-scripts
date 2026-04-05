@@ -652,7 +652,7 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     打点效率: count > 0 ? Math.round(winCount / count * (winCount > 0 ? winPointSum / winCount : 0)) : 0,
     铳点损失: count > 0 ? Math.round(ronCount / count * (ronCount > 0 ? ronPointSum / ronCount : 0)) : 0,
     净打点效率: count > 0 ? Math.round(winCount / count * (winCount > 0 ? winPointSum / winCount : 0) - ronCount / count * (ronCount > 0 ? ronPointSum / ronCount : 0)) : 0,
-    局収支: gameCount > 0 ? Math.round(gameScoreSum / count) : 0,
+    局收支: gameCount > 0 ? Math.round(gameScoreSum / count) : 0,
     平均起手向听: shantenOyaCount + shantenKoCount > 0 ? shantenSum / (shantenOyaCount + shantenKoCount) : 0,
     平均起手向听亲: shantenOyaCount > 0 ? shantenOyaSum / shantenOyaCount : 0,
     平均起手向听子: shantenKoCount > 0 ? shantenKoSum / shantenKoCount : 0,
