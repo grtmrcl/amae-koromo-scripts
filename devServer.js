@@ -384,8 +384,10 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   let 副露Count = 0;
   let 立直Count = 0;
   let 和点数Sum = 0;
+  let 和巡目Sum = 0;
   let 放铳点数Sum = 0;
   let 流局Count = 0;
+  let 流听Count = 0;
 
   if (basicDocs.length > 0) {
     // basicDB名 -> extendedDB名のマッピング
@@ -414,6 +416,7 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
             if (hasWin) {
               和Count++;
               和点数Sum += p["和"][0];
+              和巡目Sum += p["和"][2];
               if (p["自摸"] === true) 自摸Count++;
               if (p["立直"] == null && !(p["副露"] >= 1)) 默听Count++;
             }
@@ -423,7 +426,10 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
             }
             if ((p["副露"] || 0) >= 1) 副露Count++;
             if (p["立直"] != null) 立直Count++;
-            if (p["流听"] === true) 流局Count++;
+            if (p["流听"] != null) {
+              流局Count++;
+              if (p["流听"] === true) 流听Count++;
+            }
           }
         }
       })
@@ -440,10 +446,10 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     立直率: count > 0 ? 立直Count / count : 0,
     平均打点: 和Count > 0 ? Math.round(和点数Sum / 和Count) : 0,
     最大连庄: 0,
-    和了巡数: 0,
+    和了巡数: 和Count > 0 ? 和巡目Sum / 和Count : 0,
     平均铳点: 放铳Count > 0 ? Math.round(放铳点数Sum / 放铳Count) : 0,
     流局率: count > 0 ? 流局Count / count : 0,
-    流听率: 0,
+    流听率: 流局Count > 0 ? 流听Count / 流局Count : 0,
     一发率: 0,
     里宝率: 0,
     被炸率: 0,
