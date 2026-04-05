@@ -331,6 +331,9 @@ router.get(["/v2/:type/search_player/:keyword", "/:type/search_player/:keyword"]
 
 // プレイヤー詳細統計
 router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", (req, res) => {
+  let startMs = parseInt(req.params.startDate, 10);
+  let endMs = parseInt(req.params.endDate, 10);
+  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
   res.json({
     count: 0,
     和牌率: 0,
