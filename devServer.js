@@ -396,6 +396,14 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   let 立直和点数Sum = 0;
   let 立直放铳点数Sum = 0;
   let 立直放铳Count = 0;
+  let 一发Count = 0;
+  let 里宝Count = 0;
+  let 放铳时立直Count = 0;
+  let 放铳时副露Count = 0;
+
+  // fan_idに基づく役コード定数
+  const FAN_IPPATSU = 30;  // 一発
+  const FAN_URA = 33;      // 裏ドラ
 
   if (basicDocs.length > 0) {
     // basicDB名 -> extendedDB名のマッピング
@@ -432,6 +440,8 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
               if (hasRichi) {
                 立直和了Count++;
                 立直和点数Sum += p["和"][0];
+                if (p["和"][1].includes(FAN_IPPATSU)) 一发Count++;
+                if (p["和"][1].includes(FAN_URA)) 里宝Count++;
               }
               if (fuuro >= 1) 副露和了Count++;
             }
@@ -441,7 +451,9 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
               if (hasRichi) {
                 立直放铳Count++;
                 立直放铳点数Sum += p["放铳"];
+                放铳时立直Count++;
               }
+              if (fuuro >= 1) 放铳时副露Count++;
             }
             if (fuuro >= 1) 副露Count++;
             if (hasRichi) {
@@ -476,12 +488,12 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     平均铳点: 放铳Count > 0 ? Math.round(放铳点数Sum / 放铳Count) : 0,
     流局率: count > 0 ? 流局Count / count : 0,
     流听率: 流局Count > 0 ? 流听Count / 流局Count : 0,
-    一发率: 0,
-    里宝率: 0,
+    一发率: 立直和了Count > 0 ? 一发Count / 立直和了Count : 0,
+    里宝率: 立直和了Count > 0 ? 里宝Count / 立直和了Count : 0,
     被炸率: 0,
     平均被炸点数: 0,
-    放铳时立直率: 0,
-    放铳时副露率: 0,
+    放铳时立直率: 放铳Count > 0 ? 放铳时立直Count / 放铳Count : 0,
+    放铳时副露率: 放铳Count > 0 ? 放铳时副露Count / 放铳Count : 0,
     立直后放铳率: 0,
     立直后非瞬间放铳率: 0,
     副露后放铳率: 0,
