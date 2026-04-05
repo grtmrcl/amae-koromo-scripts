@@ -392,6 +392,10 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   let 副露和了Count = 0;
   let 立直后流局Count = 0;
   let 副露后流局Count = 0;
+  let 立直巡目Sum = 0;
+  let 立直和点数Sum = 0;
+  let 立直放铳点数Sum = 0;
+  let 立直放铳Count = 0;
 
   if (basicDocs.length > 0) {
     // basicDB名 -> extendedDB名のマッピング
@@ -425,15 +429,25 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
               和巡目Sum += p["和"][2];
               if (p["自摸"] === true) 自摸Count++;
               if (!hasRichi && !(fuuro >= 1)) 默听Count++;
-              if (hasRichi) 立直和了Count++;
+              if (hasRichi) {
+                立直和了Count++;
+                立直和点数Sum += p["和"][0];
+              }
               if (fuuro >= 1) 副露和了Count++;
             }
             if (p["放铳"] != null) {
               放铳Count++;
               放铳点数Sum += p["放铳"];
+              if (hasRichi) {
+                立直放铳Count++;
+                立直放铳点数Sum += p["放铳"];
+              }
             }
             if (fuuro >= 1) 副露Count++;
-            if (hasRichi) 立直Count++;
+            if (hasRichi) {
+              立直Count++;
+              立直巡目Sum += p["立直"];
+            }
             if (p["流听"] != null) {
               流局Count++;
               if (p["流听"] === true) {
@@ -481,10 +495,10 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     立直和了: 立直和了Count,
     副露和了: 副露和了Count,
     默听和了: 默听Count,
-    立直巡目: 0,
-    立直收支: 0,
-    立直收入: 0,
-    立直支出: 0,
+    立直巡目: 立直Count > 0 ? 立直巡目Sum / 立直Count : 0,
+    立直收支: 立直Count > 0 ? Math.round((立直和点数Sum - 立直放铳点数Sum) / 立直Count) : 0,
+    立直收入: 立直和了Count > 0 ? Math.round(立直和点数Sum / 立直和了Count) : 0,
+    立直支出: 立直放铳Count > 0 ? Math.round(立直放铳点数Sum / 立直放铳Count) : 0,
     先制率: 0,
     追立率: 0,
     被追率: 0,
