@@ -330,12 +330,80 @@ router.get(["/v2/:type/search_player/:keyword", "/:type/search_player/:keyword"]
 });
 
 // プレイヤー詳細統計
-router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", (req, res) => {
+router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", async (req, res) => {
+  const typeConf = TYPE_MODES[req.params.type];
+  if (!typeConf) {
+    return res.status(404).json({ error: "type_not_found" });
+  }
+
+  const playerId = parseInt(req.params.playerId, 10);
+  const modes = req.query.mode
+    ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
+    : typeConf;
+
   let startMs = parseInt(req.params.startDate, 10);
   let endMs = parseInt(req.params.endDate, 10);
   if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
-  res.json({
-    count: 0,
+  const startTimeSec = Math.floor(startMs / 1000);
+  const endTimeSec = Math.ceil(endMs / 1000);
+
+  const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
+
+  // basicDB からプレイヤー・期間に一致する対局を取得
+  const basicDocs = (
+    await Promise.all(
+      dbNames.map((db) =>
+        axios
+          .post(`${COUCH_BASE}/${db}/_find`, {
+            selector: {
+              $and: [
+                { accounts: { $elemMatch: { account_id: playerId } } },
+                { start_time: { $gte: startTimeSec } },
+                { start_time: { $lt: endTimeSec } },
+              ],
+            },
+            fields: ["_id", "standard_rule"],
+            limit: 10000,
+          })
+          .then((r) => r.data.docs || [])
+          .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)))
+      )
+    )
+  ).flat();
+
+  const playedModes = [...new Set(
+    basicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
+  )];
+
+  // extendedDB を bulk_get で一括取得し局数を合計
+  let count = 0;
+  if (basicDocs.length > 0) {
+    // basicDB名 -> extendedDB名のマッピング
+    const extendedDbMap = Object.fromEntries(
+      Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
+    );
+
+    await Promise.all(
+      dbNames.map(async (db) => {
+        const ids = basicDocs.map((doc) => ({ id: `r-${doc._id}` }));
+        if (ids.length === 0) return;
+        const extDb = extendedDbMap[db];
+        const resp = await axios
+          .post(`${COUCH_BASE}/${extDb}/_bulk_get`, { docs: ids })
+          .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)));
+        for (const result of resp.data.results || []) {
+          const doc = result.docs?.[0]?.ok;
+          if (!doc) continue;
+          const seat = doc.accounts?.indexOf(playerId);
+          if (seat === -1 || seat == null) continue;
+          count += (doc.data || []).length;
+        }
+      })
+    );
+  }
+
+  return res.json({
+    count,
     和牌率: 0,
     自摸率: 0,
     默听率: 0,
@@ -388,7 +456,7 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", (req
     平均起手向听亲: 0,
     平均起手向听子: 0,
     id: parseInt(req.params.playerId, 10),
-    played_modes: [],
+    played_modes: playedModes,
   });
 });
 
