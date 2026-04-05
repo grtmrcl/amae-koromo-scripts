@@ -388,6 +388,10 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   let 放铳点数Sum = 0;
   let 流局Count = 0;
   let 流听Count = 0;
+  let 立直和了Count = 0;
+  let 副露和了Count = 0;
+  let 立直后流局Count = 0;
+  let 副露后流局Count = 0;
 
   if (basicDocs.length > 0) {
     // basicDB名 -> extendedDB名のマッピング
@@ -413,22 +417,30 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
             if (!p) continue;
             count++;
             const hasWin = p["和"] != null;
+            const hasRichi = p["立直"] != null;
+            const fuuro = p["副露"] || 0;
             if (hasWin) {
               和Count++;
               和点数Sum += p["和"][0];
               和巡目Sum += p["和"][2];
               if (p["自摸"] === true) 自摸Count++;
-              if (p["立直"] == null && !(p["副露"] >= 1)) 默听Count++;
+              if (!hasRichi && !(fuuro >= 1)) 默听Count++;
+              if (hasRichi) 立直和了Count++;
+              if (fuuro >= 1) 副露和了Count++;
             }
             if (p["放铳"] != null) {
               放铳Count++;
               放铳点数Sum += p["放铳"];
             }
-            if ((p["副露"] || 0) >= 1) 副露Count++;
-            if (p["立直"] != null) 立直Count++;
+            if (fuuro >= 1) 副露Count++;
+            if (hasRichi) 立直Count++;
             if (p["流听"] != null) {
               流局Count++;
-              if (p["流听"] === true) 流听Count++;
+              if (p["流听"] === true) {
+                流听Count++;
+                if (hasRichi) 立直后流局Count++;
+              }
+              if (fuuro >= 1) 副露后流局Count++;
             }
           }
         }
@@ -459,16 +471,16 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     立直后放铳率: 0,
     立直后非瞬间放铳率: 0,
     副露后放铳率: 0,
-    立直后和牌率: 0,
-    副露后和牌率: 0,
-    立直后流局率: 0,
-    副露后流局率: 0,
+    立直后和牌率: 立直Count > 0 ? 立直和了Count / 立直Count : 0,
+    副露后和牌率: 副露Count > 0 ? 副露和了Count / 副露Count : 0,
+    立直后流局率: 立直Count > 0 ? 立直后流局Count / 立直Count : 0,
+    副露后流局率: 副露Count > 0 ? 副露后流局Count / 副露Count : 0,
     放铳至立直: 0,
     放铳至副露: 0,
     放铳至默听: 0,
-    立直和了: 0,
-    副露和了: 0,
-    默听和了: 0,
+    立直和了: 立直和了Count,
+    副露和了: 副露和了Count,
+    默听和了: 默听Count,
     立直巡目: 0,
     立直收支: 0,
     立直收入: 0,
