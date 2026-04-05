@@ -377,6 +377,13 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
 
   // extendedDB を bulk_get で一括取得し局数を合計
   let count = 0;
+  let 和Count = 0;
+  let 自摸Count = 0;
+  let 默听Count = 0;
+  let 放铳Count = 0;
+  let 副露Count = 0;
+  let 立直Count = 0;
+
   if (basicDocs.length > 0) {
     // basicDB名 -> extendedDB名のマッピング
     const extendedDbMap = Object.fromEntries(
@@ -396,7 +403,20 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
           if (!doc) continue;
           const seat = doc.accounts?.indexOf(playerId);
           if (seat === -1 || seat == null) continue;
-          count += (doc.data || []).length;
+          for (const kyoku of doc.data || []) {
+            const p = kyoku[seat];
+            if (!p) continue;
+            count++;
+            const hasWin = p["和"] != null;
+            if (hasWin) {
+              和Count++;
+              if (p["自摸"] === true) 自摸Count++;
+              if (p["立直"] == null && !(p["副露"] >= 1)) 默听Count++;
+            }
+            if (p["放铳"] != null) 放铳Count++;
+            if ((p["副露"] || 0) >= 1) 副露Count++;
+            if (p["立直"] != null) 立直Count++;
+          }
         }
       })
     );
@@ -404,12 +424,12 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
 
   return res.json({
     count,
-    和牌率: 0,
-    自摸率: 0,
-    默听率: 0,
-    放铳率: 0,
-    副露率: 0,
-    立直率: 0,
+    和牌率: count > 0 ? 和Count / count : 0,
+    自摸率: 和Count > 0 ? 自摸Count / 和Count : 0,
+    默听率: 和Count > 0 ? 默听Count / 和Count : 0,
+    放铳率: count > 0 ? 放铳Count / count : 0,
+    副露率: count > 0 ? 副露Count / count : 0,
+    立直率: count > 0 ? 立直Count / count : 0,
     平均打点: 0,
     最大连庄: 0,
     和了巡数: 0,
