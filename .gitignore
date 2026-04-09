@@ -38,3 +38,4 @@ paifu/*
 paifu_all/*
 paifu_temp/*
 *.log
+*.map
