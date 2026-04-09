@@ -32,6 +32,8 @@ class CouchStorage {
     assert(!mode || mode === MODE_GAME);
     this._timeout = timeout;
     this._mode = mode;
+    this._uri = uri;
+    this._suffix = suffix;
     if (mode === MODE_GAME) {
       this._db = new PouchDB(uri + suffix + "_basic", {
         fetch: this._fetch.bind(this),
@@ -284,8 +286,19 @@ class CouchStorage {
   }
   async destroyDatabases() {
     assert(this._mode === MODE_GAME);
-    await this._db.destroy();
-    await this._dbExtended.destroy();
+    for (const dbSuffix of [this._suffix + "_basic", this._suffix + "_extended"]) {
+      const dbUrl = this._uri + dbSuffix;
+      console.log(`Destroying database: ${dbUrl}`);
+      const resp = await this._fetch(dbUrl, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+      const body = await resp.json();
+      if (!body.ok) {
+        throw new Error(`Failed to destroy database ${dbUrl}: ${JSON.stringify(body)}`);
+      }
+      console.log(`Destroyed: ${dbUrl}`);
+    }
   }
   get db() {
     return this._db;

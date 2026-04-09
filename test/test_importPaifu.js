@@ -342,20 +342,27 @@ describe("isTargetGame", () => {
 });
 
 describe("CouchStorage.destroyDatabases", () => {
-  test("MODE_GAMEのとき_dbと_dbExtendedの両方をdestroyする", async () => {
-    // Given: _db と _dbExtended の destroy をモックしたストア
-    const storage = new CouchStorage({ mode: MODE_GAME });
-    const destroyDb = jest.fn().mockResolvedValue(undefined);
-    const destroyDbExtended = jest.fn().mockResolvedValue(undefined);
-    storage._db = { destroy: destroyDb };
-    storage._dbExtended = { destroy: destroyDbExtended };
+  test("MODE_GAMEのとき_basicと_extendedの両DBにDELETEリクエストを送る", async () => {
+    // Given: HTTP DELETE を受け付けるフェッチをモックしたストア
+    const storage = new CouchStorage({ uri: "http://couchdb:5984/majsoul", suffix: "_friend", mode: MODE_GAME });
+    const mockFetch = jest.fn().mockResolvedValue({
+      json: jest.fn().mockResolvedValue({ ok: true }),
+    });
+    storage._fetch = mockFetch;
 
     // When: destroyDatabases を呼ぶ
     await storage.destroyDatabases();
 
-    // Then: 両方の destroy が1回ずつ呼ばれる
-    expect(destroyDb).toHaveBeenCalledTimes(1);
-    expect(destroyDbExtended).toHaveBeenCalledTimes(1);
+    // Then: _basic と _extended の両方に DELETE リクエストが送られる
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledWith("http://couchdb:5984/majsoul_friend_basic", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(mockFetch).toHaveBeenCalledWith("http://couchdb:5984/majsoul_friend_extended", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
   });
 });
 
