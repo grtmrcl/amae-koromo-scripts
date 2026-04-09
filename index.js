@@ -10,6 +10,7 @@ const { CouchStorage, MODE_GAME } = require("./couchStorage");
 const { iterateLocalData, DEFAULT_BASE, iteratePendingData } = require("./localData");
 const { calcShanten } = require("./shanten");
 const { MajsoulGameAnalyzer } = require("./gameAnalyzer");
+const { RonStatsCollector } = require("./ronStats");
 
 CouchStorage.DEFAULT_MODE = MODE_GAME;
 
@@ -60,9 +61,11 @@ function buildRecordData({ data, dataDefinition, game }) {
   }
   assert(records.length);
   const rounds = [];
+  const ronStatsCollectors = [];
   let 振听 = null;
   let numDiscarded = null;
   let lastDiscardSeat = null;
+  let lastDiscardTile = null;
   let analyzer = null;
   for (const itemBuf of records) {
     let item;
@@ -113,6 +116,8 @@ function buildRecordData({ data, dataDefinition, game }) {
       振听 = Array(rounds[rounds.length - 1].length).fill(false);
       numDiscarded = 0;
       lastDiscardSeat = null;
+      lastDiscardTile = null;
+      ronStatsCollectors.push(new RonStatsCollector(rounds[rounds.length - 1].length));
       assert(rounds[rounds.length - 1].filter((x) => x.亲).length === 1);
       assert([3, 4].includes(rounds[rounds.length - 1].length));
       continue;
@@ -130,6 +135,7 @@ function buildRecordData({ data, dataDefinition, game }) {
         assert(typeof itemPayload.seat === "number");
         // console.log(itemPayload);
         lastDiscardSeat = itemPayload.seat;
+        lastDiscardTile = itemPayload.tile;
         振听 = itemPayload.zhenting; // Array of all players' status
         if (!curRound[itemPayload.seat].立直 && (itemPayload.is_liqi || itemPayload.is_wliqi)) {
           curRound[itemPayload.seat].立直 = numDiscarded / numPlayers + 1;
@@ -146,6 +152,23 @@ function buildRecordData({ data, dataDefinition, game }) {
         }
         if (itemPayload.is_wliqi) {
           curRound[itemPayload.seat].W立直 = true;
+        }
+        {
+          const discardJunme = numDiscarded / numPlayers + 1;
+          // 振聴中はロンできないため false。それ以外は向聴数で聴牌判定する。
+          // 立直・副露の判定は classifyPlayerState が優先するため、
+          // ここでは門前黙聴の聴牌（国士含む）と副露聴牌の識別のみを担う。
+          const tenpaiFlags = 振听.map((isFuriten, seat) => {
+            if (isFuriten) return false;
+            return analyzer.getPlayerTenpai(seat);
+          });
+          ronStatsCollectors[ronStatsCollectors.length - 1].recordDiscard(
+            itemPayload.seat,
+            itemPayload.tile,
+            discardJunme,
+            curRound,
+            tenpaiFlags
+          );
         }
         numDiscarded++;
         break;
@@ -205,6 +228,23 @@ function buildRecordData({ data, dataDefinition, game }) {
                   assert(itemPayload.hules.some((x) => x.yiman));
                 }
                 curRound[seat][seat === lastDiscardSeat ? "放铳" : "包牌"] = Math.abs(score);
+                if (seat === lastDiscardSeat && numLosingPlayers === 1 && lastDiscardTile) {
+                  // numDiscarded は放銃牌の RecordDiscardTile 処理時にインクリメント済み。
+                  // recordDiscard と同じ巡目を使うため (numDiscarded - 1) で元の値に戻す。
+                  const ronJunme = (numDiscarded - 1) / numPlayers + 1;
+                  // 放銃時点でも recordDiscard と同じ tenpaiFlags 計算を使う
+                  const tenpaiFlags = 振听.map((isFuriten, s) => {
+                    if (isFuriten) return false;
+                    return analyzer.getPlayerTenpai(s);
+                  });
+                  ronStatsCollectors[ronStatsCollectors.length - 1].recordRon(
+                    seat,
+                    lastDiscardTile,
+                    ronJunme,
+                    curRound,
+                    tenpaiFlags
+                  );
+                }
               }
             });
           }
@@ -226,15 +266,15 @@ function buildRecordData({ data, dataDefinition, game }) {
         assert(false, `Unknown record type: ${item.name}`);
     }
   }
-  return rounds;
+  return { rounds, ronStatsCollectors };
 }
 async function processRecordDataForGameId(store, uuid, recordData, gameData, batch) {
   const rawRecordInfo = {
     ...(gameData || (await withRetry(() => store.getRecordData(uuid)))),
     data: recordData,
   };
-  const rounds = buildRecordData(rawRecordInfo);
-  if (!rounds) {
+  const result = buildRecordData(rawRecordInfo);
+  if (!result) {
     console.error(`Corrupted data: ${uuid}`);
     const e = new Error(`Corrupted data: ${uuid}`);
     e.noRetry = true;
@@ -247,6 +287,7 @@ async function processRecordDataForGameId(store, uuid, recordData, gameData, bat
     fs.utimesSync(path.join(DEFAULT_BASE, "210101", uuid + ".json"), 1, 1);
     throw e;
   }
+  const { rounds, ronStatsCollectors } = result;
   // console.log(rawRecordInfo.game.uuid);
   await withRetry(() => store.saveRoundData(rawRecordInfo.game, rounds, batch));
 }
