@@ -311,6 +311,13 @@ async function importPaifu() {
     console.log("Databases destroyed and recreated.");
   }
 
+  // インデックスを作成（初回・RESET_DB後いずれも実行）
+  console.log("Ensuring CouchDB indexes...");
+  for (const store of Object.values(groups).map((g) => g.store)) {
+    await store.ensureIndexes();
+  }
+  console.log("CouchDB indexes ensured.");
+
   const files = fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
   console.log(`Found ${files.length} paifu files in ${PAIFU_DIR}`);
 
