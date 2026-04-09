@@ -268,6 +268,16 @@ async function importPaifu() {
     friendSpecial: { store: new CouchStorage({ suffix: "_friend_special", skipSetup: false }) },
   };
 
+  if (process.env.RESET_DB === "1") {
+    console.log("RESET_DB is set. Destroying and recreating databases...");
+    const groupSuffixes = { friend: "_friend", friend3: "_friend3", friendSpecial: "_friend_special" };
+    for (const [key, suffix] of Object.entries(groupSuffixes)) {
+      await groups[key].store.destroyDatabases();
+      groups[key].store = new CouchStorage({ suffix, skipSetup: false });
+    }
+    console.log("Databases destroyed and recreated.");
+  }
+
   const files = fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
   console.log(`Found ${files.length} paifu files in ${PAIFU_DIR}`);
 

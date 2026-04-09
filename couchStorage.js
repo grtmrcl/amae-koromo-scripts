@@ -282,6 +282,11 @@ class CouchStorage {
       this._timeout = oldTimeout;
     }
   }
+  async destroyDatabases() {
+    assert(this._mode === MODE_GAME);
+    await this._db.destroy();
+    await this._dbExtended.destroy();
+  }
   get db() {
     return this._db;
   }

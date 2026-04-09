@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend } = require("../importPaifu");
+const { CouchStorage, MODE_GAME } = require("../couchStorage");
 
 const PAIFU_DIR = path.join(__dirname, "../paifu");
 
@@ -337,5 +338,91 @@ describe("isTargetGame", () => {
       // Given: 3人打ちで全員がTARGET_ACCOUNT_IDSに含まれる
       expect(isTargetGame({ accounts: accounts([10, 20, 30]) })).toBe(true);
     });
+  });
+});
+
+describe("CouchStorage.destroyDatabases", () => {
+  test("MODE_GAMEのとき_dbと_dbExtendedの両方をdestroyする", async () => {
+    // Given: _db と _dbExtended の destroy をモックしたストア
+    const storage = new CouchStorage({ mode: MODE_GAME });
+    const destroyDb = jest.fn().mockResolvedValue(undefined);
+    const destroyDbExtended = jest.fn().mockResolvedValue(undefined);
+    storage._db = { destroy: destroyDb };
+    storage._dbExtended = { destroy: destroyDbExtended };
+
+    // When: destroyDatabases を呼ぶ
+    await storage.destroyDatabases();
+
+    // Then: 両方の destroy が1回ずつ呼ばれる
+    expect(destroyDb).toHaveBeenCalledTimes(1);
+    expect(destroyDbExtended).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("importPaifu の RESET_DB オプション", () => {
+  // jest.mock はホイストされるため、ファクトリ内では mock プレフィックスの変数のみ参照可能
+  let mockDestroyDatabases;
+
+  function setupMocks(resetDbValue) {
+    jest.resetModules();
+    mockDestroyDatabases = jest.fn().mockResolvedValue(undefined);
+    jest.mock("../couchStorage", () => {
+      const MockCouchStorage = jest.fn().mockImplementation(() => ({
+        destroyDatabases: mockDestroyDatabases,
+        findNonExistentRecordsFast: jest.fn().mockResolvedValue([]),
+        triggerViewRefresh: jest.fn().mockResolvedValue(undefined),
+      }));
+      MockCouchStorage.DEFAULT_MODE = "GAME";
+      return { CouchStorage: MockCouchStorage, MODE_GAME: "GAME" };
+    });
+    jest.mock("fs", () => ({
+      ...jest.requireActual("fs"),
+      readdirSync: jest.fn().mockReturnValue([]),
+    }));
+    if (resetDbValue === undefined) {
+      delete process.env.RESET_DB;
+    } else {
+      process.env.RESET_DB = resetDbValue;
+    }
+    return require("../importPaifu");
+  }
+
+  afterEach(() => {
+    delete process.env.RESET_DB;
+    jest.resetModules();
+    jest.restoreAllMocks();
+  });
+
+  test("RESET_DB=1 のとき、3つのDBグループ全てがdestroyされる", async () => {
+    // Given: RESET_DB=1 で importPaifu をロード
+    const { importPaifu } = setupMocks("1");
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: _friend, _friend3, _friend_special の3グループ分destroyが呼ばれる
+    expect(mockDestroyDatabases).toHaveBeenCalledTimes(3);
+  });
+
+  test("RESET_DB が未設定のとき、DBのdestroyは実行されない", async () => {
+    // Given: RESET_DB 未設定で importPaifu をロード
+    const { importPaifu } = setupMocks(undefined);
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: destroyDatabases は呼ばれない
+    expect(mockDestroyDatabases).not.toHaveBeenCalled();
+  });
+
+  test("RESET_DB=0 のとき、DBのdestroyは実行されない", async () => {
+    // Given: RESET_DB=0 で importPaifu をロード（文字列"0"はリセット無効）
+    const { importPaifu } = setupMocks("0");
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: destroyDatabases は呼ばれない
+    expect(mockDestroyDatabases).not.toHaveBeenCalled();
   });
 });
