@@ -16,6 +16,7 @@ const morgan = require("morgan");
 const axios = require("axios").default;
 
 const { COUCHDB_USER, COUCHDB_PASSWORD, COUCHDB_PROTO, COUCHDB_SERVER } = require("./env");
+const { TILE_CATEGORIES, PLAYER_STATES } = require("./ronStats");
 
 const app = express();
 app.use(cors());
@@ -674,6 +675,121 @@ router.post("/v2/:type/player_stats/:playerId", (req, res) => {
 // POST: player_extended_stats
 router.post("/v2/:type/player_extended_stats/:playerId", (req, res) => {
   res.json({});
+});
+
+// ron_stats: 牌カテゴリ・状態・巡目別の放銃確率
+// GET /v2/:type/ron_stats/:playerId/:startDate/:endDate
+router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res) => {
+  const typeConf = TYPE_MODES[req.params.type];
+  if (!typeConf) {
+    return res.status(404).json({ error: "type_not_found" });
+  }
+
+  const playerId = parseInt(req.params.playerId, 10);
+  if (isNaN(playerId)) return res.status(400).json({ error: "invalid_player_id" });
+
+  const modes = req.query.mode
+    ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
+    : typeConf;
+
+  let startMs = parseInt(req.params.startDate, 10);
+  let endMs = parseInt(req.params.endDate, 10);
+  if (isNaN(startMs) || isNaN(endMs)) return res.status(400).json({ error: "invalid_date" });
+  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
+  const startTimeSec = Math.floor(startMs / 1000);
+  const endTimeSec = Math.ceil(endMs / 1000);
+
+  const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
+
+  // basicDB からプレイヤー・期間に一致する対局をDB別に取得
+  const basicDocsByDb = Object.fromEntries(await Promise.all(
+    dbNames.map(async (db) => {
+      const docs = await axios
+        .post(`${COUCH_BASE}/${db}/_find`, {
+          selector: {
+            $and: [
+              { accounts: { $elemMatch: { account_id: playerId } } },
+              { start_time: { $gte: startTimeSec } },
+              { start_time: { $lt: endTimeSec } },
+            ],
+          },
+          fields: ["_id", "standard_rule", "accounts"],
+          limit: 10000,
+        })
+        .then((r) => r.data.docs || [])
+        .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
+      return [db, docs];
+    })
+  ));
+
+  // state → category → junme → { discarded, won } の累積オブジェクトを初期化
+  const totals = Object.fromEntries(
+    PLAYER_STATES.map((state) => [
+      state,
+      Object.fromEntries(
+        TILE_CATEGORIES.map((cat) => [cat, {}])
+      ),
+    ])
+  );
+
+  const extendedDbMap = Object.fromEntries(
+    Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
+  );
+
+  await Promise.all(
+    dbNames.map(async (db) => {
+      const docsForDb = basicDocsByDb[db] || [];
+      if (docsForDb.length === 0) return;
+      const ids = docsForDb.map((doc) => ({ id: `r-${doc._id}` }));
+      const extDb = extendedDbMap[db];
+      const resp = await axios
+        .post(`${COUCH_BASE}/${extDb}/_bulk_get`, { docs: ids })
+        .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)));
+      for (const result of resp.data.results || []) {
+        const doc = result.docs?.[0]?.ok;
+        if (!doc) continue;
+        // doc.ronStats が存在する場合のみ集計
+        // 構造: { [playerId]: { [junme]: { [state]: { [category]: { discarded, won } } } } }
+        const seatStats = doc.ronStats?.[playerId];
+        if (!seatStats) continue;
+        for (const [junme, junmeData] of Object.entries(seatStats)) {
+          for (const state of PLAYER_STATES) {
+            if (!junmeData[state]) continue;
+            for (const cat of TILE_CATEGORIES) {
+              const src = junmeData[state][cat];
+              if (!src) continue;
+              if (!totals[state][cat][junme]) {
+                totals[state][cat][junme] = { discarded: 0, won: 0 };
+              }
+              totals[state][cat][junme].discarded += src.discarded;
+              totals[state][cat][junme].won += src.won;
+            }
+          }
+        }
+      }
+    })
+  );
+
+  // state → category → junme → rate (won / discarded) に変換して出力
+  const output = Object.fromEntries(
+    PLAYER_STATES.map((state) => [
+      state,
+      Object.fromEntries(
+        TILE_CATEGORIES.map((cat) => {
+          const junmeMap = totals[state][cat];
+          const rates = Object.fromEntries(
+            Object.entries(junmeMap).map(([junme, { discarded, won }]) => [
+              junme,
+              discarded > 0 ? won / discarded : 0,
+            ])
+          );
+          return [cat, rates];
+        })
+      ),
+    ])
+  );
+
+  return res.json(output);
 });
 
 // ハイライトゲーム

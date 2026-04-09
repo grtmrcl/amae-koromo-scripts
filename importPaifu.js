@@ -8,6 +8,7 @@ const _ = require("lodash");
 const { CouchStorage, MODE_GAME } = require("./couchStorage");
 const { calcShanten } = require("./shanten");
 const { MajsoulGameAnalyzer } = require("./gameAnalyzer");
+const { RonStatsCollector, RonStatsAccumulator } = require("./ronStats");
 
 CouchStorage.DEFAULT_MODE = MODE_GAME;
 
@@ -51,9 +52,11 @@ function buildRecordDataFromJson({ data, game }) {
   }
 
   const rounds = [];
+  const ronStatsCollectors = [];
   let 振听 = null;
   let numDiscarded = null;
   let lastDiscardSeat = null;
+  let lastDiscardTile = null;
   let analyzer = null;
 
   for (const item of records) {
@@ -99,6 +102,8 @@ function buildRecordDataFromJson({ data, game }) {
       振听 = Array(rounds[rounds.length - 1].length).fill(false);
       numDiscarded = 0;
       lastDiscardSeat = null;
+      lastDiscardTile = null;
+      ronStatsCollectors.push(new RonStatsCollector(rounds[rounds.length - 1].length));
       assert(rounds[rounds.length - 1].filter((x) => x.亲).length === 1);
       assert([3, 4].includes(rounds[rounds.length - 1].length));
       continue;
@@ -117,6 +122,7 @@ function buildRecordDataFromJson({ data, game }) {
       case ".lq.RecordDiscardTile":
         assert(typeof itemPayload.seat === "number");
         lastDiscardSeat = itemPayload.seat;
+        lastDiscardTile = itemPayload.tile;
         振听 = itemPayload.zhenting;
         if (!curRound[itemPayload.seat].立直 && (itemPayload.is_liqi || itemPayload.is_wliqi)) {
           curRound[itemPayload.seat].立直 = numDiscarded / numPlayers + 1;
@@ -133,6 +139,20 @@ function buildRecordDataFromJson({ data, game }) {
         }
         if (itemPayload.is_wliqi) {
           curRound[itemPayload.seat].W立直 = true;
+        }
+        {
+          const discardJunme = numDiscarded / numPlayers + 1;
+          const tenpaiFlags = 振听.map((isFuriten, seat) => {
+            if (isFuriten) return false;
+            return analyzer.getPlayerTenpai(seat);
+          });
+          ronStatsCollectors[ronStatsCollectors.length - 1].recordDiscard(
+            itemPayload.seat,
+            itemPayload.tile,
+            discardJunme,
+            curRound,
+            tenpaiFlags
+          );
         }
         numDiscarded++;
         break;
@@ -190,6 +210,20 @@ function buildRecordDataFromJson({ data, game }) {
                   assert(itemPayload.hules.some((x) => x.yiman));
                 }
                 curRound[seat][seat === lastDiscardSeat ? "放铳" : "包牌"] = Math.abs(score);
+                if (seat === lastDiscardSeat && numLosingPlayers === 1 && lastDiscardTile) {
+                  const ronJunme = (numDiscarded - 1) / numPlayers + 1;
+                  const tenpaiFlags = 振听.map((isFuriten, s) => {
+                    if (isFuriten) return false;
+                    return analyzer.getPlayerTenpai(s);
+                  });
+                  ronStatsCollectors[ronStatsCollectors.length - 1].recordRon(
+                    seat,
+                    lastDiscardTile,
+                    ronJunme,
+                    curRound,
+                    tenpaiFlags
+                  );
+                }
               }
             });
           }
@@ -209,7 +243,7 @@ function buildRecordDataFromJson({ data, game }) {
     }
   }
 
-  return rounds;
+  return { rounds, ronStatsCollectors };
 }
 
 async function withRetry(func, num = 20, retryInterval = 30000) {
@@ -334,14 +368,21 @@ async function importPaifu() {
     gameData.accounts.sort((a, b) => a.seat - b.seat);
     gameData.result.players.sort((a, b) => a.seat - b.seat);
 
-    const rounds = buildRecordDataFromJson({ data: recordData, game: gameData });
-    if (!rounds) {
+    const result = buildRecordDataFromJson({ data: recordData, game: gameData });
+    if (!result) {
       console.error(`Failed to build record data: ${uuid}`);
       continue;
     }
 
+    const { rounds, ronStatsCollectors } = result;
+    const accountIds = gameData.accounts.map((a) => a.account_id);
+    const accumulator = new RonStatsAccumulator();
+    for (const collector of ronStatsCollectors) {
+      accumulator.accumulate(collector, accountIds);
+    }
+
     await withRetry(() => itemStore.saveGame(gameData, "paifu-json", true));
-    await withRetry(() => itemStore.saveRoundData(gameData, rounds, true));
+    await withRetry(() => itemStore.saveRoundData(gameData, rounds, true, accumulator.getStats()));
   }
 
   for (const store of allStores) {

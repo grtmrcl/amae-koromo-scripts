@@ -219,7 +219,7 @@ class CouchStorage {
       game: doc,
     };
   }
-  async saveRoundData(game, rounds, batch) {
+  async saveRoundData(game, rounds, batch, ronStats) {
     assert(this._mode === MODE_GAME);
     const newDoc = {
       version: 6,
@@ -232,6 +232,9 @@ class CouchStorage {
       data: rounds,
       updated: moment.utc().valueOf(),
     };
+    if (ronStats !== undefined) {
+      newDoc.ronStats = ronStats;
+    }
     newDoc._id = this.getIdForDoc(newDoc);
     await this.saveDoc(newDoc, batch);
   }
