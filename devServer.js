@@ -37,18 +37,24 @@ const BULK_GET_CHUNK_SIZE = 200;
  * @returns {Promise<object[]>} - 取得できたドキュメントの配列
  */
 async function bulkGetAll(dbUrl, ids) {
-  const results = [];
+  const chunks = [];
   for (let i = 0; i < ids.length; i += BULK_GET_CHUNK_SIZE) {
-    const chunk = ids.slice(i, i + BULK_GET_CHUNK_SIZE);
-    const resp = await axios
-      .post(`${dbUrl}/_bulk_get`, { docs: chunk })
-      .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)));
-    for (const result of resp.data.results || []) {
-      const doc = result.docs?.[0]?.ok;
-      if (doc) results.push(doc);
-    }
+    chunks.push(ids.slice(i, i + BULK_GET_CHUNK_SIZE));
   }
-  return results;
+  const chunkResults = await Promise.all(
+    chunks.map((chunk) =>
+      axios
+        .post(`${dbUrl}/_bulk_get`, { docs: chunk })
+        .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)))
+        .then((resp) =>
+          (resp.data.results || []).flatMap((result) => {
+            const doc = result.docs?.[0]?.ok;
+            return doc ? [doc] : [];
+          })
+        )
+    )
+  );
+  return chunkResults.flat();
 }
 
 // 友人戦DBのマッピング (modeId -> dbName)
@@ -379,34 +385,59 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   const endTimeSec = Math.ceil(endMs / 1000);
 
   const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
+  const extendedDbMap = Object.fromEntries(
+    Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
+  );
+  const playerSelector = {
+    $and: [
+      { accounts: { $elemMatch: { account_id: playerId } } },
+      { start_time: { $gte: startTimeSec } },
+      { start_time: { $lt: endTimeSec } },
+    ],
+  };
 
-  // basicDB からプレイヤー・期間に一致する対局をDB別に取得
-  const basicDocsByDb = Object.fromEntries(await Promise.all(
-    dbNames.map(async (db) => {
-      const docs = await axios
-        .post(`${COUCH_BASE}/${db}/_find`, {
-          selector: {
-            $and: [
-              { accounts: { $elemMatch: { account_id: playerId } } },
-              { start_time: { $gte: startTimeSec } },
-              { start_time: { $lt: endTimeSec } },
-            ],
-          },
-          fields: ["_id", "standard_rule", "accounts", "result"],
-          limit: 10000,
-        })
-        .then((r) => r.data.docs || [])
-        .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
-      return [db, docs];
-    })
-  ));
+  // basicDB と extendedDB を並列で取得
+  const [basicDocsByDb, extDocsByDb] = await Promise.all([
+    Promise.all(
+      dbNames.map(async (db) => {
+        const docs = await axios
+          .post(`${COUCH_BASE}/${db}/_find`, {
+            selector: playerSelector,
+            fields: ["_id", "standard_rule", "accounts", "result"],
+            limit: 10000,
+          })
+          .then((r) => r.data.docs || [])
+          .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
+        return [db, docs];
+      })
+    ).then(Object.fromEntries),
+    Promise.all(
+      dbNames.map(async (db) => {
+        const extDb = extendedDbMap[db];
+        const docs = await axios
+          .post(`${COUCH_BASE}/${extDb}/_find`, {
+            selector: {
+              $and: [
+                { accounts: { $elemMatch: { $eq: playerId } } },
+                { start_time: { $gte: startTimeSec } },
+                { start_time: { $lt: endTimeSec } },
+              ],
+            },
+            limit: 10000,
+          })
+          .then((r) => r.data.docs || [])
+          .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
+        return [db, docs];
+      })
+    ).then(Object.fromEntries),
+  ]);
 
   const allBasicDocs = Object.values(basicDocsByDb).flat();
   const playedModes = [...new Set(
     allBasicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
   )];
 
-  // extendedDB を bulk_get で一括取得し局数を合計
+  // extendedDB から取得した全ドキュメント
   let count = 0;
   let winCount = 0;
   let tsumoCount = 0;
@@ -473,20 +504,9 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   const FAN_URA = 33;      // 裏ドラ
   const isYakuman = (id) => (id >= 35 && id <= 50) || (id >= 59 && id <= 64);
 
-  if (allBasicDocs.length > 0) {
-    // basicDB名 -> extendedDB名のマッピング
-    const extendedDbMap = Object.fromEntries(
-      Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
-    );
-
-    await Promise.all(
-      dbNames.map(async (db) => {
-        const docsForDb = basicDocsByDb[db] || [];
-        if (docsForDb.length === 0) return;
-        const ids = docsForDb.map((doc) => ({ id: `r-${doc._id}` }));
-        const extDb = extendedDbMap[db];
-        const extDocs = await bulkGetAll(`${COUCH_BASE}/${extDb}`, ids);
-        for (const doc of extDocs) {
+  for (const db of dbNames) {
+    const extDocs = extDocsByDb[db] || [];
+    for (const doc of extDocs) {
           const seat = doc.accounts?.indexOf(playerId);
           if (seat === -1 || seat == null) continue;
           let currentRenchan = 0;
@@ -620,11 +640,9 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
               }
               if (fuuro >= 1) fuuroRyukyokuCount++;
             }
-          }
-        }
-      })
-    );
-  }
+          } // end for kyoku
+        } // end for doc
+      } // end for db
 
   return res.json({
     count,
@@ -723,27 +741,9 @@ router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res)
   const endTimeSec = Math.ceil(endMs / 1000);
 
   const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
-
-  // basicDB からプレイヤー・期間に一致する対局をDB別に取得
-  const basicDocsByDb = Object.fromEntries(await Promise.all(
-    dbNames.map(async (db) => {
-      const docs = await axios
-        .post(`${COUCH_BASE}/${db}/_find`, {
-          selector: {
-            $and: [
-              { accounts: { $elemMatch: { account_id: playerId } } },
-              { start_time: { $gte: startTimeSec } },
-              { start_time: { $lt: endTimeSec } },
-            ],
-          },
-          fields: ["_id", "standard_rule", "accounts"],
-          limit: 10000,
-        })
-        .then((r) => r.data.docs || [])
-        .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
-      return [db, docs];
-    })
-  ));
+  const extendedDbMap = Object.fromEntries(
+    Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
+  );
 
   // state → category → junme → { discarded, won } の累積オブジェクトを初期化
   const totals = Object.fromEntries(
@@ -755,17 +755,24 @@ router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res)
     ])
   );
 
-  const extendedDbMap = Object.fromEntries(
-    Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
-  );
-
+  // basicDB を経由せず extendedDB を直接クエリ
   await Promise.all(
     dbNames.map(async (db) => {
-      const docsForDb = basicDocsByDb[db] || [];
-      if (docsForDb.length === 0) return;
-      const ids = docsForDb.map((doc) => ({ id: `r-${doc._id}` }));
       const extDb = extendedDbMap[db];
-      const extDocs = await bulkGetAll(`${COUCH_BASE}/${extDb}`, ids);
+      const extDocs = await axios
+        .post(`${COUCH_BASE}/${extDb}/_find`, {
+          selector: {
+            $and: [
+              { accounts: { $elemMatch: { $eq: playerId } } },
+              { start_time: { $gte: startTimeSec } },
+              { start_time: { $lt: endTimeSec } },
+            ],
+          },
+          fields: ["ronStats"],
+          limit: 10000,
+        })
+        .then((r) => r.data.docs || [])
+        .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
       for (const doc of extDocs) {
         // doc.ronStats が存在する場合のみ集計
         // 構造: { [playerId]: { [junme]: { [state]: { [category]: { discarded, won } } } } }
