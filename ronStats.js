@@ -200,11 +200,12 @@ class RonStatsAccumulator {
     const roundStats = collector.getStats();
     assert(
       roundStats.length === accountIds.length,
-      `roundStats.length (${roundStats.length}) !== accountIds.length (${accountIds.length})`
+      `roundStats.length (${roundStats.length}) !== accountIds.length (${accountIds.length}) — accountIds must have one entry per seat (use null for empty seats)`
     );
 
     for (let seat = 0; seat < accountIds.length; seat++) {
       const playerId = accountIds[seat];
+      if (playerId == null) continue; // 空席はスキップ
       if (!this._stats[playerId]) this._stats[playerId] = {};
       const playerStats = this._stats[playerId];
       const seatStats = roundStats[seat];

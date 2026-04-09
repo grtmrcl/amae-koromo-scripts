@@ -103,7 +103,7 @@ function buildRecordDataFromJson({ data, game }) {
       numDiscarded = 0;
       lastDiscardSeat = null;
       lastDiscardTile = null;
-      ronStatsCollectors.push(new RonStatsCollector(game.accounts.length));
+      ronStatsCollectors.push(new RonStatsCollector(rounds[rounds.length - 1].length));
       assert(rounds[rounds.length - 1].filter((x) => x.亲).length === 1);
       assert([3, 4].includes(rounds[rounds.length - 1].length));
       continue;
@@ -375,10 +375,16 @@ async function importPaifu() {
     }
 
     const { rounds, ronStatsCollectors } = result;
-    const accountIds = gameData.accounts.map((a) => a.account_id);
+    // accounts は seat 順にソート済み。scores は常に numSeats（3 or 4）分あるが
+    // accounts には実際の参加者しかいないため、席番号をキーにした配列を構築する
+    const numSeats = rounds[0].length;
+    const accountIdsBySeat = Array(numSeats).fill(null);
+    for (const account of gameData.accounts) {
+      if (account.seat < numSeats) accountIdsBySeat[account.seat] = account.account_id;
+    }
     const accumulator = new RonStatsAccumulator();
     for (const collector of ronStatsCollectors) {
-      accumulator.accumulate(collector, accountIds);
+      accumulator.accumulate(collector, accountIdsBySeat);
     }
 
     await withRetry(() => itemStore.saveGame(gameData, "paifu-json", true));
