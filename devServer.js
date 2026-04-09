@@ -27,6 +27,30 @@ app.use(express.json());
 // COUCHDB_SERVER=localhost:5984 を環境変数で上書きする
 const COUCH_BASE = `${COUCHDB_PROTO}://${COUCHDB_USER}:${COUCHDB_PASSWORD}@${COUCHDB_SERVER}`;
 
+// _bulk_get のチャンクサイズ（大量ドキュメント取得時のタイムアウト回避）
+const BULK_GET_CHUNK_SIZE = 200;
+
+/**
+ * CouchDB の _bulk_get をチャンク分割して実行し、全 ok ドキュメントを返す
+ * @param {string} dbUrl - CouchDB のDB URL
+ * @param {{ id: string }[]} ids - 取得するドキュメントIDリスト
+ * @returns {Promise<object[]>} - 取得できたドキュメントの配列
+ */
+async function bulkGetAll(dbUrl, ids) {
+  const results = [];
+  for (let i = 0; i < ids.length; i += BULK_GET_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_GET_CHUNK_SIZE);
+    const resp = await axios
+      .post(`${dbUrl}/_bulk_get`, { docs: chunk })
+      .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)));
+    for (const result of resp.data.results || []) {
+      const doc = result.docs?.[0]?.ok;
+      if (doc) results.push(doc);
+    }
+  }
+  return results;
+}
+
 // 友人戦DBのマッピング (modeId -> dbName)
 // modeId=1: 標準ルール4人, modeId=2: 非標準ルール4人
 const FRIEND_DBS = {
@@ -458,12 +482,8 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
         if (docsForDb.length === 0) return;
         const ids = docsForDb.map((doc) => ({ id: `r-${doc._id}` }));
         const extDb = extendedDbMap[db];
-        const resp = await axios
-          .post(`${COUCH_BASE}/${extDb}/_bulk_get`, { docs: ids })
-          .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)));
-        for (const result of resp.data.results || []) {
-          const doc = result.docs?.[0]?.ok;
-          if (!doc) continue;
+        const extDocs = await bulkGetAll(`${COUCH_BASE}/${extDb}`, ids);
+        for (const doc of extDocs) {
           const seat = doc.accounts?.indexOf(playerId);
           if (seat === -1 || seat == null) continue;
           let currentRenchan = 0;
@@ -742,12 +762,8 @@ router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res)
       if (docsForDb.length === 0) return;
       const ids = docsForDb.map((doc) => ({ id: `r-${doc._id}` }));
       const extDb = extendedDbMap[db];
-      const resp = await axios
-        .post(`${COUCH_BASE}/${extDb}/_bulk_get`, { docs: ids })
-        .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)));
-      for (const result of resp.data.results || []) {
-        const doc = result.docs?.[0]?.ok;
-        if (!doc) continue;
+      const extDocs = await bulkGetAll(`${COUCH_BASE}/${extDb}`, ids);
+      for (const doc of extDocs) {
         // doc.ronStats が存在する場合のみ集計
         // 構造: { [playerId]: { [junme]: { [state]: { [category]: { discarded, won } } } } }
         const seatStats = doc.ronStats?.[playerId];
