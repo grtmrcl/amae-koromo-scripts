@@ -52,10 +52,13 @@ async function bulkGetAll(dbUrl, ids) {
 }
 
 // 友人戦DBのマッピング (modeId -> dbName)
-// modeId=1: 標準ルール4人, modeId=2: 非標準ルール4人
+// modeId=1: 標準ルール4人 (suffix: _friend)
+// modeId=2: 非標準ルール4人 (suffix: _friend_special)
+// modeId=3: 3人打ち (suffix: _friend3)
 const FRIEND_DBS = {
   1: "majsoul_friend_basic",
   2: "majsoul_friend_special_basic",
+  3: "majsoul_friend3_basic",
 };
 // pl_friend: modes=[1,2], pl_friend3: modes=[3]
 const TYPE_MODES = {
