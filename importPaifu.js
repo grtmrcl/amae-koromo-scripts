@@ -288,8 +288,7 @@ function getStoreForFriend(groups, gameData) {
   if (gameData.accounts.length === 3) {
     return groups.friend3.store;
   }
-  const detailRule = gameData.config.mode && gameData.config.mode.detail_rule;
-  if (!isStandardDetailRule(detailRule)) {
+  if (!gameData.standard_rule) {
     return groups.friendSpecial.store;
   }
   return groups.friend.store;

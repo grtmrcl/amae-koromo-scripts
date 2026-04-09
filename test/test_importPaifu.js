@@ -322,11 +322,12 @@ describe("getStoreForFriend", () => {
     expect(store).toBe("friend3_store");
   });
 
-  test("4人打ちで非標準ルールのゲームはfriendSpecialストアに振り分けられる", () => {
-    // Given: 4人打ちでdora_countが異なる非標準ルール
+  test("4人打ちでstandard_rule=0のゲームはfriendSpecialストアに振り分けられる", () => {
+    // Given: 4人打ちで非標準ルール（standard_rule=0）
     const gameData = {
       accounts: [{}, {}, {}, {}],
-      config: { mode: { detail_rule: { ...STANDARD_RULE, dora_count: 4 } } },
+      standard_rule: 0,
+      config: {},
     };
 
     const store = getStoreForFriend(makeGroups(), gameData);
@@ -334,11 +335,12 @@ describe("getStoreForFriend", () => {
     expect(store).toBe("friendSpecial_store");
   });
 
-  test("4人打ちで標準ルールのゲームはfriendストアに振り分けられる", () => {
-    // Given: 4人打ちで標準ルール
+  test("4人打ちでstandard_rule=1のゲームはfriendストアに振り分けられる", () => {
+    // Given: 4人打ちで標準ルール（standard_rule=1）
     const gameData = {
       accounts: [{}, {}, {}, {}],
-      config: { mode: { detail_rule: { ...STANDARD_RULE } } },
+      standard_rule: 1,
+      config: {},
     };
 
     const store = getStoreForFriend(makeGroups(), gameData);
