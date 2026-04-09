@@ -123,24 +123,32 @@ async function queryGamesByTimeRange(dbName, startTimeSec, endTimeSec, limit, de
 
 /**
  * CouchDB に必要なインデックスを作成する（存在する場合はスキップ）
+ * basicDB: start_time / accounts + start_time
+ * extendedDB: start_time / accounts + start_time
  */
 async function ensureIndexes() {
-  const dbs = [...new Set(Object.values(FRIEND_DBS))];
-  for (const db of dbs) {
-    try {
-      await axios.post(`${COUCH_BASE}/${db}/_index`, {
-        index: { fields: ["start_time"] },
-        name: "start_time_idx",
-        type: "json",
-      });
-      await axios.post(`${COUCH_BASE}/${db}/_index`, {
-        index: { fields: ["start_time", "accounts"] },
-        name: "start_time_accounts_idx",
-        type: "json",
-      });
-    } catch (e) {
-      if (e.response?.status !== 404) {
-        console.warn(`[devServer] インデックス作成をスキップ (${db}):`, e.response?.data || e.message);
+  const basicDbs = [...new Set(Object.values(FRIEND_DBS))];
+  const extendedDbs = basicDbs.map((db) => db.replace("_basic", "_extended"));
+  const indexDefs = [
+    { name: "start_time_idx", fields: ["start_time"] },
+    { name: "accounts_start_time_idx", fields: ["accounts", "start_time"] },
+  ];
+
+  for (const db of [...basicDbs, ...extendedDbs]) {
+    for (const { name, fields } of indexDefs) {
+      try {
+        const resp = await axios.post(`${COUCH_BASE}/${db}/_index`, {
+          index: { fields },
+          name,
+          type: "json",
+        });
+        if (resp.data.result === "created") {
+          console.log(`[devServer] インデックス作成: "${name}" on ${db}`);
+        }
+      } catch (e) {
+        if (e.response?.status !== 404) {
+          console.warn(`[devServer] インデックス作成をスキップ (${db}/${name}):`, e.response?.data || e.message);
+        }
       }
     }
   }

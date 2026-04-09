@@ -303,6 +303,37 @@ class CouchStorage {
       console.log(`Destroyed: ${dbUrl}`);
     }
   }
+  async ensureIndexes() {
+    assert(this._mode === MODE_GAME);
+    // basicDB: accounts（$elemMatch）と start_time の複合インデックス
+    // extendedDB: accounts（$elemMatch）と start_time の複合インデックス
+    const indexDefs = [
+      { name: "start_time_idx", fields: ["start_time"] },
+      { name: "accounts_start_time_idx", fields: ["accounts", "start_time"] },
+    ];
+    for (const [db, dbSuffix] of [
+      [this._db, this._suffix + "_basic"],
+      [this._dbExtended, this._suffix + "_extended"],
+    ]) {
+      if (!db) continue;
+      const dbUrl = this._uri + dbSuffix;
+      for (const { name, fields } of indexDefs) {
+        const resp = await this._fetch(`${dbUrl}/_index`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index: { fields }, name, type: "json" }),
+        });
+        const body = await resp.json();
+        if (body.result === "created") {
+          console.log(`[ensureIndexes] Created index "${name}" on ${dbSuffix}`);
+        } else if (body.result === "exists") {
+          // すでに存在する場合はスキップ
+        } else {
+          console.warn(`[ensureIndexes] Unexpected response for "${name}" on ${dbSuffix}:`, body);
+        }
+      }
+    }
+  }
   get db() {
     return this._db;
   }

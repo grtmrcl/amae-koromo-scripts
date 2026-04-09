@@ -430,6 +430,7 @@ describe("importPaifu の RESET_DB オプション", () => {
     jest.mock("../couchStorage", () => {
       const MockCouchStorage = jest.fn().mockImplementation(() => ({
         destroyDatabases: mockDestroyDatabases,
+        ensureIndexes: jest.fn().mockResolvedValue(undefined),
         findNonExistentRecordsFast: jest.fn().mockResolvedValue([]),
         triggerViewRefresh: jest.fn().mockResolvedValue(undefined),
       }));
