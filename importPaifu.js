@@ -103,7 +103,7 @@ function buildRecordDataFromJson({ data, game }) {
       numDiscarded = 0;
       lastDiscardSeat = null;
       lastDiscardTile = null;
-      ronStatsCollectors.push(new RonStatsCollector(rounds[rounds.length - 1].length));
+      ronStatsCollectors.push(new RonStatsCollector(game.accounts.length));
       assert(rounds[rounds.length - 1].filter((x) => x.亲).length === 1);
       assert([3, 4].includes(rounds[rounds.length - 1].length));
       continue;
