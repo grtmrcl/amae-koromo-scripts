@@ -210,6 +210,20 @@ export class MajsoulGameAnalyzer {
     this._players = tiles.map((t) => new Player(t.map(validateTile)));
     this._latestDoras = newRoundRecord.doras?.map(validateTile) || [];
   }
+  /**
+   * 指定座席のプレイヤーが聴牌しているか判定する。
+   * 副露プレイヤーは国士と両立しないため syanten() === 0 のみで判定し、
+   * 門前プレイヤーは国士聴牌も考慮する。
+   */
+  getPlayerTenpai(seat: number): boolean {
+    const player = this._players[seat];
+    if (player._opened.some((m) => m.discard !== undefined)) {
+      // 副露あり（kita/暗槓を除くチー・ポン・明カン）→ 国士は不可
+      return player.syanten() === 0;
+    }
+    // 門前: 通常聴牌 または 国士聴牌
+    return player.syanten() === 0 || player.isKokushiTenpai();
+  }
   getRemainingNumTiles(seat: number, tiles: (Tile | string)[]): number {
     assert(this._latestDoras.length && this._latestDoras.length <= 5);
     const bin = new TileBin();
