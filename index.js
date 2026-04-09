@@ -155,9 +155,13 @@ function buildRecordData({ data, dataDefinition, game }) {
         }
         {
           const discardJunme = numDiscarded / numPlayers + 1;
-          // 振聴中のプレイヤーはロンできないため tenpai カウント対象外とする
-          // （振聴フラグが立っていても聴牌状態は立直・副露で判定済みなのでここでは false）
-          const tenpaiFlags = 振听.map(() => false);
+          // 振聴中はロンできないため false。それ以外は向聴数で聴牌判定する。
+          // 立直・副露の判定は classifyPlayerState が優先するため、
+          // ここでは門前黙聴の聴牌（国士含む）と副露聴牌の識別のみを担う。
+          const tenpaiFlags = 振听.map((isFuriten, seat) => {
+            if (isFuriten) return false;
+            return analyzer.getPlayerTenpai(seat);
+          });
           ronStatsCollectors[ronStatsCollectors.length - 1].recordDiscard(
             itemPayload.seat,
             itemPayload.tile,
@@ -228,7 +232,11 @@ function buildRecordData({ data, dataDefinition, game }) {
                   // numDiscarded は放銃牌の RecordDiscardTile 処理時にインクリメント済み。
                   // recordDiscard と同じ巡目を使うため (numDiscarded - 1) で元の値に戻す。
                   const ronJunme = (numDiscarded - 1) / numPlayers + 1;
-                  const tenpaiFlags = 振听.map(() => false);
+                  // 放銃時点でも recordDiscard と同じ tenpaiFlags 計算を使う
+                  const tenpaiFlags = 振听.map((isFuriten, s) => {
+                    if (isFuriten) return false;
+                    return analyzer.getPlayerTenpai(s);
+                  });
                   ronStatsCollectors[ronStatsCollectors.length - 1].recordRon(
                     seat,
                     lastDiscardTile,
