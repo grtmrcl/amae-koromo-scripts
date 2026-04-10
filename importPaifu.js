@@ -65,7 +65,8 @@ function buildRecordDataFromJson({ data, game }) {
     const itemPayload = item.data;
 
     if (itemName !== ".lq.RecordNewRound") {
-      assert(analyzer);
+      // RecordNewRound より前に出現するレコード（RecordNewCard 等）は analyzer 未初期化のためスキップ
+      if (!analyzer) continue;
       try {
         analyzer.processRecord(itemName, itemPayload);
       } catch (e) {
