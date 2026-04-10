@@ -155,6 +155,26 @@ async function ensureIndexes() {
 }
 
 /**
+ * ron_stats エンドポイント用のCouchDBセレクタを構築する
+ *
+ * @param {string} playerIdStr - 対象プレイヤーID（文字列）
+ * @param {string|undefined} startDateStr - 開始日時（ミリ秒文字列）、省略時は全期間
+ * @param {string|undefined} endDateStr - 終了日時（ミリ秒文字列）、省略時は現在時刻
+ * @returns {{ selector: object } | { error: string }}
+ */
+function buildRonStatsSelector(playerIdStr, startDateStr, endDateStr) {
+  const selector = { [`ronStats.${playerIdStr}`]: { $exists: true } };
+  if (startDateStr) {
+    let startMs = parseInt(startDateStr, 10);
+    let endMs = endDateStr ? parseInt(endDateStr, 10) : Date.now();
+    if (isNaN(startMs) || isNaN(endMs)) return { error: "invalid_date" };
+    if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
+    selector.start_time = { $gte: Math.floor(startMs / 1000), $lt: Math.ceil(endMs / 1000) };
+  }
+  return { selector };
+}
+
+/**
  * extendedDB から取得した ronStats ドキュメント群を集計し、出力形式に変換する
  *
  * @param {object[]} extDocs - fields: ["ronStats.{playerIdStr}"] で取得したドキュメント配列
@@ -803,14 +823,9 @@ async function handleRonStats(req, res) {
   // fields に "ronStats.{playerId}" を指定することで対象プレイヤーのデータのみ転送し高速化
   const playerIdStr = String(playerId);
 
-  const selector = { [`ronStats.${playerIdStr}`]: { $exists: true } };
-  if (req.params.startDate) {
-    let startMs = parseInt(req.params.startDate, 10);
-    let endMs = req.params.endDate ? parseInt(req.params.endDate, 10) : Date.now();
-    if (isNaN(startMs) || isNaN(endMs)) return res.status(400).json({ error: "invalid_date" });
-    if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
-    selector.start_time = { $gte: Math.floor(startMs / 1000), $lt: Math.ceil(endMs / 1000) };
-  }
+  const selectorResult = buildRonStatsSelector(playerIdStr, req.params.startDate, req.params.endDate);
+  if (selectorResult.error) return res.status(400).json({ error: selectorResult.error });
+  const selector = selectorResult.selector;
 
   const extDocs = (
     await Promise.all(
@@ -852,7 +867,7 @@ app.use("/api/", router);
 app.use("/api-test/", router);
 app.use("/", router);
 
-module.exports = { buildRonStatsOutput };
+module.exports = { buildRonStatsOutput, buildRonStatsSelector };
 
 if (require.main === module) {
   const port = parseInt(process.env.PORT, 10) || 3000;
