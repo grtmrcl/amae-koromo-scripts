@@ -8,7 +8,7 @@ jest.mock("../env", () => ({
   COUCHDB_URL: "http://admin:password@localhost:5984/majsoul",
 }));
 
-const { buildRonStatsOutput } = require("../devServer");
+const { buildRonStatsOutput, buildRonStatsSelector } = require("../devServer");
 
 describe("放銃統計の集計と放銃率への変換", () => {
   test.each([
@@ -155,5 +155,78 @@ describe("放銃統計の集計と放銃率への変換", () => {
 
     // Then
     expect(result).toEqual(expected);
+  });
+});
+
+describe("放銃統計クエリの日付条件構築", () => {
+  test.each([
+    {
+      name: "日付指定なしの場合、start_time 条件なしで全期間を対象とする",
+      // Given
+      playerIdStr: "100",
+      startDateStr: undefined,
+      endDateStr: undefined,
+      // Then
+      expected: { selector: { "ronStats.100": { $exists: true } } },
+    },
+    {
+      name: "開始・終了日付を指定した場合、秒単位の start_time 範囲条件が付与される",
+      // Given
+      playerIdStr: "200",
+      startDateStr: "1000000000000", // 1000000000 秒
+      endDateStr: "2000000000000",   // 2000000000 秒
+      // Then
+      expected: {
+        selector: {
+          "ronStats.200": { $exists: true },
+          start_time: { $gte: 1000000000, $lt: 2000000000 },
+        },
+      },
+    },
+    {
+      name: "開始日付のみ指定した場合、終了は現在時刻として start_time 条件が付与される",
+      // Given
+      playerIdStr: "300",
+      startDateStr: "1000000000000",
+      endDateStr: undefined,
+      // Then: start_time.$gte が設定され、$lt は現在時刻以上であること（動的なので存在確認のみ）
+      expected: null, // 動的値のため個別検証
+    },
+    {
+      name: "開始日付 > 終了日付の場合、自動的にスワップして正しい範囲になる",
+      // Given
+      playerIdStr: "400",
+      startDateStr: "2000000000000",
+      endDateStr: "1000000000000",
+      // Then
+      expected: {
+        selector: {
+          "ronStats.400": { $exists: true },
+          start_time: { $gte: 1000000000, $lt: 2000000000 },
+        },
+      },
+    },
+    {
+      name: "日付として解析できない文字列を指定した場合、エラーが返る",
+      // Given
+      playerIdStr: "500",
+      startDateStr: "invalid",
+      endDateStr: undefined,
+      // Then
+      expected: { error: "invalid_date" },
+    },
+  ])("$name", ({ playerIdStr, startDateStr, endDateStr, expected }) => {
+    // When
+    const result = buildRonStatsSelector(playerIdStr, startDateStr, endDateStr);
+
+    // Then
+    if (expected === null) {
+      // 開始日付のみ指定のケース: $gte が startDateStr 由来の値、$lt が現在時刻以上であることを確認
+      expect(result.selector["ronStats.300"]).toEqual({ $exists: true });
+      expect(result.selector.start_time.$gte).toBe(1000000000);
+      expect(result.selector.start_time.$lt).toBeGreaterThanOrEqual(Math.ceil(Date.now() / 1000) - 5);
+    } else {
+      expect(result).toEqual(expected);
+    }
   });
 });
