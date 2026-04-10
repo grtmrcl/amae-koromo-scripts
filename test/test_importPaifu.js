@@ -10,6 +10,8 @@ const PAIFU_DIR = path.join(__dirname, "../paifu");
 
 const NEW_FORMAT_FILE = path.join(PAIFU_DIR, "230520-ae4fa20c-b7a0-4c77-a79d-905b2f5eb9ef.json");
 const OLD_FORMAT_FILE = path.join(PAIFU_DIR, "200411-bfad3680-829e-4cd9-8d7d-a6882c0850e4.json");
+// RecordNewRound より前に RecordNewCard が出現するファイル
+const RECORD_NEW_CARD_FIRST_FILE = path.join(PAIFU_DIR, "220428-58e776a0-8c17-483e-a75a-4607c1375ac2.json");
 
 function loadPaifu(filePath) {
   const parsed = JSON.parse(fs.readFileSync(filePath, { encoding: "utf-8" }));
@@ -164,6 +166,20 @@ describe("buildRecordDataFromJson", () => {
         const dealers = round.filter((seat) => seat.亲 === true);
         expect(dealers).toHaveLength(1);
       }
+    });
+  });
+
+  describe("RecordNewRound より前に RecordNewCard が出現する場合でも正常に処理できる", () => {
+    test("ラウンドデータが正しく生成される", () => {
+      // Given: RecordNewCard が RecordNewRound より前に出現する paifu（5局分）
+      const { game, data } = loadPaifu(RECORD_NEW_CARD_FIRST_FILE);
+
+      // When: ラウンドデータを生成する
+      const result = buildRecordDataFromJson({ data, game });
+
+      // Then: null でなく、5局分のラウンドデータが返る
+      expect(result).not.toBeNull();
+      expect(result.rounds).toHaveLength(5);
     });
   });
 
