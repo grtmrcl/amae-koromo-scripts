@@ -8,6 +8,7 @@ const _ = require("lodash");
 const { CouchStorage, MODE_GAME } = require("./couchStorage");
 const { calcShanten } = require("./shanten");
 const { MajsoulGameAnalyzer } = require("./gameAnalyzer");
+const { RonStatsCollector, RonStatsAccumulator } = require("./ronStats");
 
 CouchStorage.DEFAULT_MODE = MODE_GAME;
 
@@ -51,9 +52,11 @@ function buildRecordDataFromJson({ data, game }) {
   }
 
   const rounds = [];
+  const ronStatsCollectors = [];
   let 振听 = null;
   let numDiscarded = null;
   let lastDiscardSeat = null;
+  let lastDiscardTile = null;
   let analyzer = null;
 
   for (const item of records) {
@@ -99,6 +102,8 @@ function buildRecordDataFromJson({ data, game }) {
       振听 = Array(rounds[rounds.length - 1].length).fill(false);
       numDiscarded = 0;
       lastDiscardSeat = null;
+      lastDiscardTile = null;
+      ronStatsCollectors.push(new RonStatsCollector(rounds[rounds.length - 1].length));
       assert(rounds[rounds.length - 1].filter((x) => x.亲).length === 1);
       assert([3, 4].includes(rounds[rounds.length - 1].length));
       continue;
@@ -117,6 +122,7 @@ function buildRecordDataFromJson({ data, game }) {
       case ".lq.RecordDiscardTile":
         assert(typeof itemPayload.seat === "number");
         lastDiscardSeat = itemPayload.seat;
+        lastDiscardTile = itemPayload.tile;
         振听 = itemPayload.zhenting;
         if (!curRound[itemPayload.seat].立直 && (itemPayload.is_liqi || itemPayload.is_wliqi)) {
           curRound[itemPayload.seat].立直 = numDiscarded / numPlayers + 1;
@@ -133,6 +139,15 @@ function buildRecordDataFromJson({ data, game }) {
         }
         if (itemPayload.is_wliqi) {
           curRound[itemPayload.seat].W立直 = true;
+        }
+        {
+          const discardJunme = numDiscarded / numPlayers + 1;
+          ronStatsCollectors[ronStatsCollectors.length - 1].recordDiscard(
+            itemPayload.seat,
+            itemPayload.tile,
+            discardJunme,
+            curRound
+          );
         }
         numDiscarded++;
         break;
@@ -190,6 +205,15 @@ function buildRecordDataFromJson({ data, game }) {
                   assert(itemPayload.hules.some((x) => x.yiman));
                 }
                 curRound[seat][seat === lastDiscardSeat ? "放铳" : "包牌"] = Math.abs(score);
+                if (seat === lastDiscardSeat && numLosingPlayers === 1 && lastDiscardTile) {
+                  const ronJunme = (numDiscarded - 1) / numPlayers + 1;
+                  ronStatsCollectors[ronStatsCollectors.length - 1].recordRon(
+                    seat,
+                    lastDiscardTile,
+                    ronJunme,
+                    curRound
+                  );
+                }
               }
             });
           }
@@ -209,7 +233,7 @@ function buildRecordDataFromJson({ data, game }) {
     }
   }
 
-  return rounds;
+  return { rounds, ronStatsCollectors };
 }
 
 async function withRetry(func, num = 20, retryInterval = 30000) {
@@ -254,8 +278,7 @@ function getStoreForFriend(groups, gameData) {
   if (gameData.accounts.length === 3) {
     return groups.friend3.store;
   }
-  const detailRule = gameData.config.mode && gameData.config.mode.detail_rule;
-  if (!isStandardDetailRule(detailRule)) {
+  if (!gameData.standard_rule) {
     return groups.friendSpecial.store;
   }
   return groups.friend.store;
@@ -267,6 +290,23 @@ async function importPaifu() {
     friend3: { store: new CouchStorage({ suffix: "_friend3", skipSetup: false }) },
     friendSpecial: { store: new CouchStorage({ suffix: "_friend_special", skipSetup: false }) },
   };
+
+  if (process.env.RESET_DB === "1") {
+    console.log("RESET_DB is set. Destroying and recreating databases...");
+    const groupSuffixes = { friend: "_friend", friend3: "_friend3", friendSpecial: "_friend_special" };
+    for (const [key, suffix] of Object.entries(groupSuffixes)) {
+      await groups[key].store.destroyDatabases();
+      groups[key].store = new CouchStorage({ suffix, skipSetup: false });
+    }
+    console.log("Databases destroyed and recreated.");
+  }
+
+  // インデックスを作成（初回・RESET_DB後いずれも実行）
+  console.log("Ensuring CouchDB indexes...");
+  for (const store of Object.values(groups).map((g) => g.store)) {
+    await store.ensureIndexes();
+  }
+  console.log("CouchDB indexes ensured.");
 
   const files = fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
   console.log(`Found ${files.length} paifu files in ${PAIFU_DIR}`);
@@ -324,14 +364,27 @@ async function importPaifu() {
     gameData.accounts.sort((a, b) => a.seat - b.seat);
     gameData.result.players.sort((a, b) => a.seat - b.seat);
 
-    const rounds = buildRecordDataFromJson({ data: recordData, game: gameData });
-    if (!rounds) {
+    const result = buildRecordDataFromJson({ data: recordData, game: gameData });
+    if (!result) {
       console.error(`Failed to build record data: ${uuid}`);
       continue;
     }
 
+    const { rounds, ronStatsCollectors } = result;
+    // accounts は seat 順にソート済み。scores は常に numSeats（3 or 4）分あるが
+    // accounts には実際の参加者しかいないため、席番号をキーにした配列を構築する
+    const numSeats = rounds[0].length;
+    const accountIdsBySeat = Array(numSeats).fill(null);
+    for (const account of gameData.accounts) {
+      if (account.seat < numSeats) accountIdsBySeat[account.seat] = account.account_id;
+    }
+    const accumulator = new RonStatsAccumulator();
+    for (const collector of ronStatsCollectors) {
+      accumulator.accumulate(collector, accountIdsBySeat);
+    }
+
     await withRetry(() => itemStore.saveGame(gameData, "paifu-json", true));
-    await withRetry(() => itemStore.saveRoundData(gameData, rounds, true));
+    await withRetry(() => itemStore.saveRoundData(gameData, rounds, true, accumulator.getStats()));
   }
 
   for (const store of allStores) {

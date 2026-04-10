@@ -16,6 +16,7 @@ const morgan = require("morgan");
 const axios = require("axios").default;
 
 const { COUCHDB_USER, COUCHDB_PASSWORD, COUCHDB_PROTO, COUCHDB_SERVER } = require("./env");
+const { TILE_CATEGORIES, PLAYER_STATES } = require("./ronStats");
 
 const app = express();
 app.use(cors());
@@ -26,11 +27,44 @@ app.use(express.json());
 // COUCHDB_SERVER=localhost:5984 を環境変数で上書きする
 const COUCH_BASE = `${COUCHDB_PROTO}://${COUCHDB_USER}:${COUCHDB_PASSWORD}@${COUCHDB_SERVER}`;
 
+// _bulk_get のチャンクサイズ（大量ドキュメント取得時のタイムアウト回避）
+const BULK_GET_CHUNK_SIZE = 200;
+
+/**
+ * CouchDB の _bulk_get をチャンク分割して実行し、全 ok ドキュメントを返す
+ * @param {string} dbUrl - CouchDB のDB URL
+ * @param {{ id: string }[]} ids - 取得するドキュメントIDリスト
+ * @returns {Promise<object[]>} - 取得できたドキュメントの配列
+ */
+async function bulkGetAll(dbUrl, ids) {
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += BULK_GET_CHUNK_SIZE) {
+    chunks.push(ids.slice(i, i + BULK_GET_CHUNK_SIZE));
+  }
+  const chunkResults = await Promise.all(
+    chunks.map((chunk) =>
+      axios
+        .post(`${dbUrl}/_bulk_get`, { docs: chunk })
+        .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)))
+        .then((resp) =>
+          (resp.data.results || []).flatMap((result) => {
+            const doc = result.docs?.[0]?.ok;
+            return doc ? [doc] : [];
+          })
+        )
+    )
+  );
+  return chunkResults.flat();
+}
+
 // 友人戦DBのマッピング (modeId -> dbName)
-// modeId=1: 標準ルール4人, modeId=2: 非標準ルール4人
+// modeId=1: 標準ルール4人 (suffix: _friend)
+// modeId=2: 非標準ルール4人 (suffix: _friend_special)
+// modeId=3: 3人打ち (suffix: _friend3)
 const FRIEND_DBS = {
   1: "majsoul_friend_basic",
   2: "majsoul_friend_special_basic",
+  3: "majsoul_friend3_basic",
 };
 // pl_friend: modes=[1,2], pl_friend3: modes=[3]
 const TYPE_MODES = {
@@ -89,27 +123,118 @@ async function queryGamesByTimeRange(dbName, startTimeSec, endTimeSec, limit, de
 
 /**
  * CouchDB に必要なインデックスを作成する（存在する場合はスキップ）
+ * basicDB: start_time / accounts + start_time
+ * extendedDB: start_time / accounts + start_time
  */
 async function ensureIndexes() {
-  const dbs = [...new Set(Object.values(FRIEND_DBS))];
-  for (const db of dbs) {
-    try {
-      await axios.post(`${COUCH_BASE}/${db}/_index`, {
-        index: { fields: ["start_time"] },
-        name: "start_time_idx",
-        type: "json",
-      });
-      await axios.post(`${COUCH_BASE}/${db}/_index`, {
-        index: { fields: ["start_time", "accounts"] },
-        name: "start_time_accounts_idx",
-        type: "json",
-      });
-    } catch (e) {
-      if (e.response?.status !== 404) {
-        console.warn(`[devServer] インデックス作成をスキップ (${db}):`, e.response?.data || e.message);
+  const basicDbs = [...new Set(Object.values(FRIEND_DBS))];
+  const extendedDbs = basicDbs.map((db) => db.replace("_basic", "_extended"));
+  const indexDefs = [
+    { name: "start_time_idx", fields: ["start_time"] },
+    { name: "accounts_start_time_idx", fields: ["accounts", "start_time"] },
+  ];
+
+  for (const db of [...basicDbs, ...extendedDbs]) {
+    for (const { name, fields } of indexDefs) {
+      try {
+        const resp = await axios.post(`${COUCH_BASE}/${db}/_index`, {
+          index: { fields },
+          name,
+          type: "json",
+        });
+        if (resp.data.result === "created") {
+          console.log(`[devServer] インデックス作成: "${name}" on ${db}`);
+        }
+      } catch (e) {
+        if (e.response?.status !== 404) {
+          console.warn(`[devServer] インデックス作成をスキップ (${db}/${name}):`, e.response?.data || e.message);
+        }
       }
     }
   }
+}
+
+/**
+ * ron_stats エンドポイント用のCouchDBセレクタを構築する
+ *
+ * @param {string} playerIdStr - 対象プレイヤーID（文字列）
+ * @param {string|undefined} startDateStr - 開始日時（ミリ秒文字列）、省略時は全期間
+ * @param {string|undefined} endDateStr - 終了日時（ミリ秒文字列）、省略時は現在時刻
+ * @returns {{ selector: object } | { error: string }}
+ */
+function buildRonStatsSelector(playerIdStr, startDateStr, endDateStr) {
+  const selector = { [`ronStats.${playerIdStr}`]: { $exists: true } };
+  if (startDateStr) {
+    let startMs = parseInt(startDateStr, 10);
+    let endMs = endDateStr ? parseInt(endDateStr, 10) : Date.now();
+    if (isNaN(startMs) || isNaN(endMs)) return { error: "invalid_date" };
+    if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
+    selector.start_time = { $gte: Math.floor(startMs / 1000), $lt: Math.ceil(endMs / 1000) };
+  }
+  return { selector };
+}
+
+/**
+ * extendedDB から取得した ronStats ドキュメント群を集計し、出力形式に変換する
+ *
+ * @param {object[]} extDocs - fields: ["ronStats.{playerIdStr}"] で取得したドキュメント配列
+ * @param {string} playerIdStr - 対象プレイヤーID（文字列）
+ * @returns {{ [state: string]: { [category: string]: { [junme: string]: number } } }}
+ */
+const OUTPUT_STATES = ["total", ...PLAYER_STATES];
+
+function buildRonStatsOutput(extDocs, playerIdStr) {
+  // state ごとの巡目別集計: totals[state][cat][junme] = { discarded, won }
+  const totals = Object.fromEntries(
+    OUTPUT_STATES.map((state) => [
+      state,
+      Object.fromEntries(TILE_CATEGORIES.map((cat) => [cat, {}])),
+    ])
+  );
+
+  for (const doc of extDocs) {
+    const seatStats = doc.ronStats?.[playerIdStr];
+    if (!seatStats) continue;
+    for (const [junme, junmeData] of Object.entries(seatStats)) {
+      for (const state of PLAYER_STATES) {
+        if (!junmeData[state]) continue;
+        for (const cat of TILE_CATEGORIES) {
+          const src = junmeData[state][cat];
+          if (!src) continue;
+          // 各 state に加算
+          if (!totals[state][cat][junme]) {
+            totals[state][cat][junme] = { discarded: 0, won: 0 };
+          }
+          totals[state][cat][junme].discarded += src.discarded;
+          totals[state][cat][junme].won += src.won;
+          // total にも加算
+          if (!totals.total[cat][junme]) {
+            totals.total[cat][junme] = { discarded: 0, won: 0 };
+          }
+          totals.total[cat][junme].discarded += src.discarded;
+          totals.total[cat][junme].won += src.won;
+        }
+      }
+    }
+  }
+
+  return Object.fromEntries(
+    OUTPUT_STATES.map((state) => [
+      state,
+      Object.fromEntries(
+        TILE_CATEGORIES.map((cat) => {
+          const junmeMap = totals[state][cat];
+          const rates = Object.fromEntries(
+            Object.entries(junmeMap).map(([junme, { discarded, won }]) => [
+              junme,
+              discarded > 0 ? won / discarded : 0,
+            ])
+          );
+          return [cat, rates];
+        })
+      ),
+    ])
+  );
 }
 
 const router = express.Router();
@@ -351,34 +476,59 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   const endTimeSec = Math.ceil(endMs / 1000);
 
   const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
+  const extendedDbMap = Object.fromEntries(
+    Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
+  );
+  const playerSelector = {
+    $and: [
+      { accounts: { $elemMatch: { account_id: playerId } } },
+      { start_time: { $gte: startTimeSec } },
+      { start_time: { $lt: endTimeSec } },
+    ],
+  };
 
-  // basicDB からプレイヤー・期間に一致する対局をDB別に取得
-  const basicDocsByDb = Object.fromEntries(await Promise.all(
-    dbNames.map(async (db) => {
-      const docs = await axios
-        .post(`${COUCH_BASE}/${db}/_find`, {
-          selector: {
-            $and: [
-              { accounts: { $elemMatch: { account_id: playerId } } },
-              { start_time: { $gte: startTimeSec } },
-              { start_time: { $lt: endTimeSec } },
-            ],
-          },
-          fields: ["_id", "standard_rule", "accounts", "result"],
-          limit: 10000,
-        })
-        .then((r) => r.data.docs || [])
-        .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
-      return [db, docs];
-    })
-  ));
+  // basicDB と extendedDB を並列で取得
+  const [basicDocsByDb, extDocsByDb] = await Promise.all([
+    Promise.all(
+      dbNames.map(async (db) => {
+        const docs = await axios
+          .post(`${COUCH_BASE}/${db}/_find`, {
+            selector: playerSelector,
+            fields: ["_id", "standard_rule", "accounts", "result"],
+            limit: 10000,
+          })
+          .then((r) => r.data.docs || [])
+          .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
+        return [db, docs];
+      })
+    ).then(Object.fromEntries),
+    Promise.all(
+      dbNames.map(async (db) => {
+        const extDb = extendedDbMap[db];
+        const docs = await axios
+          .post(`${COUCH_BASE}/${extDb}/_find`, {
+            selector: {
+              $and: [
+                { accounts: { $elemMatch: { $eq: playerId } } },
+                { start_time: { $gte: startTimeSec } },
+                { start_time: { $lt: endTimeSec } },
+              ],
+            },
+            limit: 10000,
+          })
+          .then((r) => r.data.docs || [])
+          .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
+        return [db, docs];
+      })
+    ).then(Object.fromEntries),
+  ]);
 
   const allBasicDocs = Object.values(basicDocsByDb).flat();
   const playedModes = [...new Set(
     allBasicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
   )];
 
-  // extendedDB を bulk_get で一括取得し局数を合計
+  // extendedDB から取得した全ドキュメント
   let count = 0;
   let winCount = 0;
   let tsumoCount = 0;
@@ -445,24 +595,9 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   const FAN_URA = 33;      // 裏ドラ
   const isYakuman = (id) => (id >= 35 && id <= 50) || (id >= 59 && id <= 64);
 
-  if (allBasicDocs.length > 0) {
-    // basicDB名 -> extendedDB名のマッピング
-    const extendedDbMap = Object.fromEntries(
-      Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
-    );
-
-    await Promise.all(
-      dbNames.map(async (db) => {
-        const docsForDb = basicDocsByDb[db] || [];
-        if (docsForDb.length === 0) return;
-        const ids = docsForDb.map((doc) => ({ id: `r-${doc._id}` }));
-        const extDb = extendedDbMap[db];
-        const resp = await axios
-          .post(`${COUCH_BASE}/${extDb}/_bulk_get`, { docs: ids })
-          .catch((e) => (e.response?.status === 404 ? { data: { results: [] } } : Promise.reject(e)));
-        for (const result of resp.data.results || []) {
-          const doc = result.docs?.[0]?.ok;
-          if (!doc) continue;
+  for (const db of dbNames) {
+    const extDocs = extDocsByDb[db] || [];
+    for (const doc of extDocs) {
           const seat = doc.accounts?.indexOf(playerId);
           if (seat === -1 || seat == null) continue;
           let currentRenchan = 0;
@@ -596,11 +731,9 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
               }
               if (fuuro >= 1) fuuroRyukyokuCount++;
             }
-          }
-        }
-      })
-    );
-  }
+          } // end for kyoku
+        } // end for doc
+      } // end for db
 
   return res.json({
     count,
@@ -676,6 +809,57 @@ router.post("/v2/:type/player_extended_stats/:playerId", (req, res) => {
   res.json({});
 });
 
+// ron_stats: 牌カテゴリ・状態・巡目別の放銃確率
+// GET /v2/:type/ron_stats/:playerId[/:startDate[/:endDate]]
+async function handleRonStats(req, res) {
+  const typeConf = TYPE_MODES[req.params.type];
+  if (!typeConf) {
+    return res.status(404).json({ error: "type_not_found" });
+  }
+
+  const playerId = parseInt(req.params.playerId, 10);
+  if (isNaN(playerId)) return res.status(400).json({ error: "invalid_player_id" });
+
+  const modes = req.query.mode
+    ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
+    : typeConf;
+
+  const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
+  const extendedDbMap = Object.fromEntries(
+    Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
+  );
+
+  // basicDB を経由せず extendedDB を直接クエリ（buildRonStatsOutput に集計を委譲）
+  // fields に "ronStats.{playerId}" を指定することで対象プレイヤーのデータのみ転送し高速化
+  const playerIdStr = String(playerId);
+
+  const selectorResult = buildRonStatsSelector(playerIdStr, req.params.startDate, req.params.endDate);
+  if (selectorResult.error) return res.status(400).json({ error: selectorResult.error });
+  const selector = selectorResult.selector;
+
+  const extDocs = (
+    await Promise.all(
+      dbNames.map(async (db) => {
+        const extDb = extendedDbMap[db];
+        return axios
+          .post(`${COUCH_BASE}/${extDb}/_find`, {
+            selector,
+            fields: [`ronStats.${playerIdStr}`],
+            limit: 10000,
+          })
+          .then((r) => r.data.docs || [])
+          .catch((e) => (e.response?.status === 404 ? [] : Promise.reject(e)));
+      })
+    )
+  ).flat();
+
+  return res.json(buildRonStatsOutput(extDocs, playerIdStr));
+}
+
+router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", handleRonStats);
+router.get("/v2/:type/ron_stats/:playerId/:startDate", handleRonStats);
+router.get("/v2/:type/ron_stats/:playerId", handleRonStats);
+
 // ハイライトゲーム
 router.get("/v2/:type/recent_highlight_games", (req, res) => res.json([]));
 // グローバル統計系（未実装）
@@ -693,11 +877,15 @@ app.use("/api/", router);
 app.use("/api-test/", router);
 app.use("/", router);
 
-const port = parseInt(process.env.PORT, 10) || 3000;
-const host = process.env.HOST || "0.0.0.0";
-app.listen(port, host, async () => {
-  console.log(`[devServer] 起動しました: http://${host}:${port}`);
-  console.log(`[devServer] CouchDB: ${COUCHDB_PROTO}://${COUCHDB_SERVER}`);
-  await ensureIndexes();
-  console.log(`[devServer] インデックスを確認しました`);
-});
+module.exports = { buildRonStatsOutput, buildRonStatsSelector };
+
+if (require.main === module) {
+  const port = parseInt(process.env.PORT, 10) || 3000;
+  const host = process.env.HOST || "0.0.0.0";
+  app.listen(port, host, async () => {
+    console.log(`[devServer] 起動しました: http://${host}:${port}`);
+    console.log(`[devServer] CouchDB: ${COUCHDB_PROTO}://${COUCHDB_SERVER}`);
+    await ensureIndexes();
+    console.log(`[devServer] インデックスを確認しました`);
+  });
+}

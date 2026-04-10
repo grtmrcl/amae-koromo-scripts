@@ -32,6 +32,8 @@ class CouchStorage {
     assert(!mode || mode === MODE_GAME);
     this._timeout = timeout;
     this._mode = mode;
+    this._uri = uri;
+    this._suffix = suffix;
     if (mode === MODE_GAME) {
       this._db = new PouchDB(uri + suffix + "_basic", {
         fetch: this._fetch.bind(this),
@@ -217,7 +219,7 @@ class CouchStorage {
       game: doc,
     };
   }
-  async saveRoundData(game, rounds, batch) {
+  async saveRoundData(game, rounds, batch, ronStats) {
     assert(this._mode === MODE_GAME);
     const newDoc = {
       version: 6,
@@ -230,6 +232,9 @@ class CouchStorage {
       data: rounds,
       updated: moment.utc().valueOf(),
     };
+    if (ronStats !== undefined) {
+      newDoc.ronStats = ronStats;
+    }
     newDoc._id = this.getIdForDoc(newDoc);
     await this.saveDoc(newDoc, batch);
   }
@@ -280,6 +285,53 @@ class CouchStorage {
       await Promise.all(promises);
     } finally {
       this._timeout = oldTimeout;
+    }
+  }
+  async destroyDatabases() {
+    assert(this._mode === MODE_GAME);
+    for (const dbSuffix of [this._suffix + "_basic", this._suffix + "_extended"]) {
+      const dbUrl = this._uri + dbSuffix;
+      console.log(`Destroying database: ${dbUrl}`);
+      const resp = await this._fetch(dbUrl, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+      const body = await resp.json();
+      if (!body.ok) {
+        throw new Error(`Failed to destroy database ${dbUrl}: ${JSON.stringify(body)}`);
+      }
+      console.log(`Destroyed: ${dbUrl}`);
+    }
+  }
+  async ensureIndexes() {
+    assert(this._mode === MODE_GAME);
+    // basicDB: accounts（$elemMatch）と start_time の複合インデックス
+    // extendedDB: accounts（$elemMatch）と start_time の複合インデックス
+    const indexDefs = [
+      { name: "start_time_idx", fields: ["start_time"] },
+      { name: "accounts_start_time_idx", fields: ["accounts", "start_time"] },
+    ];
+    for (const [db, dbSuffix] of [
+      [this._db, this._suffix + "_basic"],
+      [this._dbExtended, this._suffix + "_extended"],
+    ]) {
+      if (!db) continue;
+      const dbUrl = this._uri + dbSuffix;
+      for (const { name, fields } of indexDefs) {
+        const resp = await this._fetch(`${dbUrl}/_index`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index: { fields }, name, type: "json" }),
+        });
+        const body = await resp.json();
+        if (body.result === "created") {
+          console.log(`[ensureIndexes] Created index "${name}" on ${dbSuffix}`);
+        } else if (body.result === "exists") {
+          // すでに存在する場合はスキップ
+        } else {
+          console.warn(`[ensureIndexes] Unexpected response for "${name}" on ${dbSuffix}:`, body);
+        }
+      }
     }
   }
   get db() {

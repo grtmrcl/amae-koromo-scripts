@@ -10,21 +10,20 @@ const assert = require("assert");
  *
  * - seat: 0-3 (プレイヤー座席)
  * - junme: 1-18 (巡目、整数に丸める)
- * - state: "riichi" | "open" | "tenpai"
+ * - state: "riichi" | "open" | "other"
  *     - riichi: 立直中（振聴立直含む）
  *     - open: 副露中（聴牌・非聴牌を問わない）
- *     - tenpai: 門前黙聴（副露なし・立直なし・非振聴）
+ *     - other: 門前（副露なし・立直なし・聴牌の有無を問わない）
  * - tileCategory: "honor" | "terminals" | "near-terminals" | "middle" | "inner" | "five"
  *
  * 注意:
- * - 振聴中のプレイヤーはロンできないため、tenpai 状態としてカウントしない。
- *   ただし振聴立直は立直フラグで先に捕捉される。
  * - 副露中プレイヤーは聴牌の有無によらず "open" として扱う。
  *   副露+聴牌を別ステートに分けることは現状の牌譜データからは困難なため。
+ * - 門前（other）は聴牌・非聴牌を区別せず全ての門前プレイヤーを対象とする。
  */
 
 const TILE_CATEGORIES = ["honor", "terminals", "near-terminals", "middle", "inner", "five"];
-const PLAYER_STATES = ["riichi", "open", "tenpai"];
+const PLAYER_STATES = ["riichi", "open", "other"];
 
 /**
  * 牌カテゴリを分類する
@@ -80,19 +79,17 @@ function createStateStats() {
 /**
  * プレイヤーの手牌状態を判定する
  *
- * 優先順位: 立直 > 副露 > 黙聴 > 非聴牌(null)
+ * 優先順位: 立直 > 副露 > 門前（other）
  * 副露中は聴牌・非聴牌を区別せず "open" として扱う。
- * 振聴中のプレイヤーは isTenpai=false として渡すこと（ロンできないためカウント対象外）。
+ * 門前プレイヤーは聴牌・非聴牌を問わず "other" として扱う。
  *
  * @param {{ 立直?: number, 副露?: number }} playerRound - プレイヤーの現在のラウンドデータ
- * @param {boolean} isTenpai - 現時点で黙聴かどうか（振聴の場合は false を渡すこと）
- * @returns {"riichi" | "open" | "tenpai" | null} 状態（非聴牌・振聴の場合はnull）
+ * @returns {"riichi" | "open" | "other"} 状態
  */
-function classifyPlayerState(playerRound, isTenpai) {
+function classifyPlayerState(playerRound) {
   if (playerRound.立直) return "riichi";
   if (playerRound.副露) return "open";
-  if (isTenpai) return "tenpai";
-  return null;
+  return "other";
 }
 
 /**
@@ -125,24 +122,20 @@ class RonStatsCollector {
    *
    * RecordDiscardTile の処理中（立直フラグ設定後、numDiscarded++ 前）に呼ぶ。
    * 「他のプレイヤーがその牌を切った」を、残りのプレイヤー（手番以外）の視点で記録する。
-   * 振聴中のプレイヤーはロンできないため、tenpaiFlags は振聴を除いた黙聴フラグを渡すこと。
    *
    * @param {number} discardSeat - 切ったプレイヤーの座席
    * @param {string} tile - 切られた牌
    * @param {number} junme - 現在の巡目（小数の場合は切り上げて整数巡目に丸める）
    * @param {{ 立直?: number, 副露?: number }[]} curRound - 全プレイヤーの現在のラウンドデータ
-   * @param {boolean[]} tenpaiFlags - 各プレイヤーの黙聴フラグ（振聴は除く）
    */
-  recordDiscard(discardSeat, tile, junme, curRound, tenpaiFlags) {
+  recordDiscard(discardSeat, tile, junme, curRound) {
     const category = classifyTile(tile);
     const roundedJunme = Math.ceil(junme);
 
     for (let seat = 0; seat < this._numPlayers; seat++) {
       if (seat === discardSeat) continue;
 
-      const state = classifyPlayerState(curRound[seat], tenpaiFlags[seat]);
-      if (state === null) continue; // 非聴牌・振聴はカウント対象外
-
+      const state = classifyPlayerState(curRound[seat]);
       const entry = this._getEntry(seat, roundedJunme, state, category);
       entry.discarded++;
     }
@@ -159,15 +152,12 @@ class RonStatsCollector {
    * @param {string} tile - 放銃牌
    * @param {number} junme - 放銃牌を切った時点の巡目
    * @param {{ 立直?: number, 副露?: number }[]} curRound - 全プレイヤーの現在のラウンドデータ
-   * @param {boolean[]} tenpaiFlags - 各プレイヤーの黙聴フラグ（振聴は除く）
    */
-  recordRon(ronSeat, tile, junme, curRound, tenpaiFlags) {
+  recordRon(ronSeat, tile, junme, curRound) {
     const category = classifyTile(tile);
     const roundedJunme = Math.ceil(junme);
 
-    const state = classifyPlayerState(curRound[ronSeat], tenpaiFlags[ronSeat]);
-    if (state === null) return; // 非聴牌・振聴は記録しない（通常あり得ない）
-
+    const state = classifyPlayerState(curRound[ronSeat]);
     const entry = this._getEntry(ronSeat, roundedJunme, state, category);
     entry.won++;
   }
@@ -200,11 +190,12 @@ class RonStatsAccumulator {
     const roundStats = collector.getStats();
     assert(
       roundStats.length === accountIds.length,
-      `roundStats.length (${roundStats.length}) !== accountIds.length (${accountIds.length})`
+      `roundStats.length (${roundStats.length}) !== accountIds.length (${accountIds.length}) — accountIds must have one entry per seat (use null for empty seats)`
     );
 
     for (let seat = 0; seat < accountIds.length; seat++) {
       const playerId = accountIds[seat];
+      if (playerId == null) continue; // 空席はスキップ
       if (!this._stats[playerId]) this._stats[playerId] = {};
       const playerStats = this._stats[playerId];
       const seatStats = roundStats[seat];
