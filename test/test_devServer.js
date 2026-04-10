@@ -10,19 +10,24 @@ jest.mock("../env", () => ({
 
 const { buildRonStatsOutput, buildRonStatsSelector } = require("../devServer");
 
+// テスト用ヘルパー: 空の state オブジェクト（全巡目空）
+const emptyCats = { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} };
+const emptyAllStates = { total: emptyCats, riichi: emptyCats, open: emptyCats, other: emptyCats };
+
+// テスト用ヘルパー: 全カテゴリ同一値の state オブジェクト
+function allCats(junme, rate) {
+  return Object.fromEntries(["honor", "terminals", "near-terminals", "middle", "inner", "five"].map((c) => [c, { [junme]: rate }]));
+}
+
 describe("放銃統計の集計と放銃率への変換", () => {
   test.each([
     {
-      name: "ドキュメントが空の場合、全カテゴリ・状態で空オブジェクトを返す",
+      name: "ドキュメントが空の場合、全カテゴリ・状態（total含む）で空オブジェクトを返す",
       // Given
       extDocs: [],
       playerIdStr: "100",
       // Then
-      expected: {
-        riichi: { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} },
-        open:   { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} },
-        tenpai: { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} },
-      },
+      expected: emptyAllStates,
     },
     {
       name: "ronStats を持たないドキュメントはスキップされる",
@@ -30,14 +35,10 @@ describe("放銃統計の集計と放銃率への変換", () => {
       extDocs: [{ ronStats: {} }, {}],
       playerIdStr: "100",
       // Then
-      expected: {
-        riichi: { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} },
-        open:   { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} },
-        tenpai: { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} },
-      },
+      expected: emptyAllStates,
     },
     {
-      name: "1件放銃があった巡目のカテゴリで正しい放銃率を返す",
+      name: "1件放銃があった巡目で riichi の放銃率と total が正しく計算される",
       // Given
       extDocs: [
         {
@@ -53,36 +54,30 @@ describe("放銃統計の集計と放銃率への変換", () => {
                   five:            { discarded: 0,  won: 0 },
                 },
                 open:   { honor: { discarded: 0, won: 0 }, terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 } },
-                tenpai: { honor: { discarded: 0, won: 0 }, terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 } },
+                other: { honor: { discarded: 0, won: 0 }, terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 } },
               },
             },
           },
         },
       ],
       playerIdStr: "200",
-      // Then: riichi/honor/巡目3 = 2/10 = 0.2、同巡目で discarded=0 のカテゴリは rate=0 で出力される
+      // Then: riichi/honor/巡目3 = 2/10 = 0.2、total も同値になる
       expected: {
-        riichi: {
-          honor:           { "3": 0.2 },
-          terminals:       { "3": 0 },
-          "near-terminals":{ "3": 0 },
-          middle:          { "3": 0 },
-          inner:           { "3": 0 },
-          five:            { "3": 0 },
-        },
+        total:  { honor: { "3": 0.2 }, terminals: { "3": 0 }, "near-terminals": { "3": 0 }, middle: { "3": 0 }, inner: { "3": 0 }, five: { "3": 0 } },
+        riichi: { honor: { "3": 0.2 }, terminals: { "3": 0 }, "near-terminals": { "3": 0 }, middle: { "3": 0 }, inner: { "3": 0 }, five: { "3": 0 } },
         open:   { honor: { "3": 0 }, terminals: { "3": 0 }, "near-terminals": { "3": 0 }, middle: { "3": 0 }, inner: { "3": 0 }, five: { "3": 0 } },
-        tenpai: { honor: { "3": 0 }, terminals: { "3": 0 }, "near-terminals": { "3": 0 }, middle: { "3": 0 }, inner: { "3": 0 }, five: { "3": 0 } },
+        other: { honor: { "3": 0 }, terminals: { "3": 0 }, "near-terminals": { "3": 0 }, middle: { "3": 0 }, inner: { "3": 0 }, five: { "3": 0 } },
       },
     },
     {
-      name: "複数ドキュメントの同じ巡目・カテゴリは加算して集計される",
+      name: "複数ドキュメントの同じ巡目・カテゴリは加算して集計され total にも反映される",
       // Given
       extDocs: [
         {
           ronStats: {
             "300": {
               "5": {
-                tenpai: {
+                other: {
                   honor: { discarded: 4, won: 1 },
                   terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 },
                 },
@@ -96,7 +91,7 @@ describe("放銃統計の集計と放銃率への変換", () => {
           ronStats: {
             "300": {
               "5": {
-                tenpai: {
+                other: {
                   honor: { discarded: 6, won: 3 },
                   terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 },
                 },
@@ -108,22 +103,16 @@ describe("放銃統計の集計と放銃率への変換", () => {
         },
       ],
       playerIdStr: "300",
-      // Then: tenpai/honor/巡目5 = (1+3)/(4+6) = 0.4、同巡目の他カテゴリは rate=0 で出力
+      // Then: other/honor/巡目5 = (1+3)/(4+6) = 0.4、total も同値
       expected: {
+        total:  { honor: { "5": 0.4 }, terminals: { "5": 0 }, "near-terminals": { "5": 0 }, middle: { "5": 0 }, inner: { "5": 0 }, five: { "5": 0 } },
         riichi: { honor: { "5": 0 }, terminals: { "5": 0 }, "near-terminals": { "5": 0 }, middle: { "5": 0 }, inner: { "5": 0 }, five: { "5": 0 } },
         open:   { honor: { "5": 0 }, terminals: { "5": 0 }, "near-terminals": { "5": 0 }, middle: { "5": 0 }, inner: { "5": 0 }, five: { "5": 0 } },
-        tenpai: {
-          honor:           { "5": 0.4 },
-          terminals:       { "5": 0 },
-          "near-terminals":{ "5": 0 },
-          middle:          { "5": 0 },
-          inner:           { "5": 0 },
-          five:            { "5": 0 },
-        },
+        other: { honor: { "5": 0.4 }, terminals: { "5": 0 }, "near-terminals": { "5": 0 }, middle: { "5": 0 }, inner: { "5": 0 }, five: { "5": 0 } },
       },
     },
     {
-      name: "discarded が 0 の巡目は rate=0 として出力される",
+      name: "discarded が 0 の巡目は rate=0 として出力され total にも反映される",
       // Given
       extDocs: [
         {
@@ -135,18 +124,50 @@ describe("放銃統計の集計と放銃率への変換", () => {
                   terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 },
                 },
                 open:   { honor: { discarded: 0, won: 0 }, terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 } },
-                tenpai: { honor: { discarded: 0, won: 0 }, terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 } },
+                other: { honor: { discarded: 0, won: 0 }, terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 } },
               },
             },
           },
         },
       ],
       playerIdStr: "400",
-      // Then: 全 discarded=0 なので全巡目が rate=0 として出力される
+      // Then: 全 discarded=0 なので rate=0 で出力
       expected: {
-        riichi: { honor: { "2": 0 }, terminals: { "2": 0 }, "near-terminals": { "2": 0 }, middle: { "2": 0 }, inner: { "2": 0 }, five: { "2": 0 } },
-        open:   { honor: { "2": 0 }, terminals: { "2": 0 }, "near-terminals": { "2": 0 }, middle: { "2": 0 }, inner: { "2": 0 }, five: { "2": 0 } },
-        tenpai: { honor: { "2": 0 }, terminals: { "2": 0 }, "near-terminals": { "2": 0 }, middle: { "2": 0 }, inner: { "2": 0 }, five: { "2": 0 } },
+        total:  allCats("2", 0),
+        riichi: allCats("2", 0),
+        open:   allCats("2", 0),
+        other: allCats("2", 0),
+      },
+    },
+    {
+      name: "riichi と other に両方データがある場合、total は両者を合算して計算される",
+      // Given
+      extDocs: [
+        {
+          ronStats: {
+            "500": {
+              "4": {
+                riichi: {
+                  honor: { discarded: 10, won: 1 },
+                  terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 },
+                },
+                other: {
+                  honor: { discarded: 20, won: 4 },
+                  terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 },
+                },
+                open: { honor: { discarded: 0, won: 0 }, terminals: { discarded: 0, won: 0 }, "near-terminals": { discarded: 0, won: 0 }, middle: { discarded: 0, won: 0 }, inner: { discarded: 0, won: 0 }, five: { discarded: 0, won: 0 } },
+              },
+            },
+          },
+        },
+      ],
+      playerIdStr: "500",
+      // Then: total/honor/巡目4 = (1+4)/(10+20) = 5/30 ≈ 0.1667
+      expected: {
+        total:  { honor: { "4": 5 / 30 }, terminals: { "4": 0 }, "near-terminals": { "4": 0 }, middle: { "4": 0 }, inner: { "4": 0 }, five: { "4": 0 } },
+        riichi: { honor: { "4": 0.1 },   terminals: { "4": 0 }, "near-terminals": { "4": 0 }, middle: { "4": 0 }, inner: { "4": 0 }, five: { "4": 0 } },
+        open:   { honor: { "4": 0 },     terminals: { "4": 0 }, "near-terminals": { "4": 0 }, middle: { "4": 0 }, inner: { "4": 0 }, five: { "4": 0 } },
+        other: { honor: { "4": 0.2 },   terminals: { "4": 0 }, "near-terminals": { "4": 0 }, middle: { "4": 0 }, inner: { "4": 0 }, five: { "4": 0 } },
       },
     },
   ])("$name", ({ extDocs, playerIdStr, expected }) => {

@@ -181,9 +181,12 @@ function buildRonStatsSelector(playerIdStr, startDateStr, endDateStr) {
  * @param {string} playerIdStr - 対象プレイヤーID（文字列）
  * @returns {{ [state: string]: { [category: string]: { [junme: string]: number } } }}
  */
+const OUTPUT_STATES = ["total", ...PLAYER_STATES];
+
 function buildRonStatsOutput(extDocs, playerIdStr) {
+  // state ごとの巡目別集計: totals[state][cat][junme] = { discarded, won }
   const totals = Object.fromEntries(
-    PLAYER_STATES.map((state) => [
+    OUTPUT_STATES.map((state) => [
       state,
       Object.fromEntries(TILE_CATEGORIES.map((cat) => [cat, {}])),
     ])
@@ -198,18 +201,25 @@ function buildRonStatsOutput(extDocs, playerIdStr) {
         for (const cat of TILE_CATEGORIES) {
           const src = junmeData[state][cat];
           if (!src) continue;
+          // 各 state に加算
           if (!totals[state][cat][junme]) {
             totals[state][cat][junme] = { discarded: 0, won: 0 };
           }
           totals[state][cat][junme].discarded += src.discarded;
           totals[state][cat][junme].won += src.won;
+          // total にも加算
+          if (!totals.total[cat][junme]) {
+            totals.total[cat][junme] = { discarded: 0, won: 0 };
+          }
+          totals.total[cat][junme].discarded += src.discarded;
+          totals.total[cat][junme].won += src.won;
         }
       }
     }
   }
 
   return Object.fromEntries(
-    PLAYER_STATES.map((state) => [
+    OUTPUT_STATES.map((state) => [
       state,
       Object.fromEntries(
         TILE_CATEGORIES.map((cat) => {
