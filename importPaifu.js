@@ -142,16 +142,11 @@ function buildRecordDataFromJson({ data, game }) {
         }
         {
           const discardJunme = numDiscarded / numPlayers + 1;
-          const tenpaiFlags = 振听.map((isFuriten, seat) => {
-            if (isFuriten) return false;
-            return analyzer.getPlayerTenpai(seat);
-          });
           ronStatsCollectors[ronStatsCollectors.length - 1].recordDiscard(
             itemPayload.seat,
             itemPayload.tile,
             discardJunme,
-            curRound,
-            tenpaiFlags
+            curRound
           );
         }
         numDiscarded++;
@@ -212,16 +207,11 @@ function buildRecordDataFromJson({ data, game }) {
                 curRound[seat][seat === lastDiscardSeat ? "放铳" : "包牌"] = Math.abs(score);
                 if (seat === lastDiscardSeat && numLosingPlayers === 1 && lastDiscardTile) {
                   const ronJunme = (numDiscarded - 1) / numPlayers + 1;
-                  const tenpaiFlags = 振听.map((isFuriten, s) => {
-                    if (isFuriten) return false;
-                    return analyzer.getPlayerTenpai(s);
-                  });
                   ronStatsCollectors[ronStatsCollectors.length - 1].recordRon(
                     seat,
                     lastDiscardTile,
                     ronJunme,
-                    curRound,
-                    tenpaiFlags
+                    curRound
                   );
                 }
               }

@@ -37,47 +37,30 @@ describe("プレイヤー状態の判定", () => {
     {
       name: "立直中は riichi",
       playerRound: { 立直: 3 },
-      isTenpai: false,
       expected: "riichi",
     },
     {
-      name: "立直かつ黙聴フラグありでも riichi が優先",
-      playerRound: { 立直: 1 },
-      isTenpai: true,
-      expected: "riichi",
-    },
-    {
-      name: "副露中は open",
+      name: "副露中は open（立直なし）",
       playerRound: { 副露: 1 },
-      isTenpai: false,
       expected: "open",
     },
     {
-      name: "副露かつ黙聴フラグありでも open が優先",
-      playerRound: { 副露: 2 },
-      isTenpai: true,
-      expected: "open",
+      name: "立直かつ副露があっても riichi が優先",
+      playerRound: { 立直: 1, 副露: 1 },
+      expected: "riichi",
     },
     {
-      name: "立直なし・副露なし・黙聴フラグありは tenpai",
+      name: "立直なし・副露なしは other（聴牌の有無を問わない）",
       playerRound: {},
-      isTenpai: true,
-      expected: "tenpai",
+      expected: "other",
     },
     {
-      name: "立直なし・副露なし・黙聴フラグなしは null（非聴牌）",
+      name: "非聴牌の門前プレイヤーも other として扱われる",
       playerRound: {},
-      isTenpai: false,
-      expected: null,
+      expected: "other",
     },
-    {
-      name: "振聴中は isTenpai=false で渡すため null（カウント対象外）",
-      playerRound: {},
-      isTenpai: false,
-      expected: null,
-    },
-  ])("$name", ({ playerRound, isTenpai, expected }) => {
-    expect(classifyPlayerState(playerRound, isTenpai)).toBe(expected);
+  ])("$name", ({ playerRound, expected }) => {
+    expect(classifyPlayerState(playerRound)).toBe(expected);
   });
 });
 
@@ -87,13 +70,13 @@ describe("放銃統計コレクター", () => {
   describe("切り牌の記録", () => {
     test.each([
       {
-        name: "非聴牌のプレイヤーは記録されない",
+        name: "門前プレイヤー（非聴牌）にも字牌が切られた場合に記録される",
         discardSeat: 0,
         tile: "3z",
         junme: 1,
-        curRound: [{}, {}, {}, {}], // 全員非聴牌
-        tenpaiFlags: [false, false, false, false],
-        expectedSeat1: { discarded: 0, won: 0 },
+        curRound: [{}, {}, {}, {}], // 全員門前
+        expectedSeat1: { discarded: 1, won: 0 },
+        expectedState1: "other",
       },
       {
         name: "立直中のプレイヤーに字牌が切られた場合に記録される",
@@ -101,8 +84,8 @@ describe("放銃統計コレクター", () => {
         tile: "3z",
         junme: 1,
         curRound: [{}, { 立直: 1 }, {}, {}],
-        tenpaiFlags: [false, false, false, false],
         expectedSeat1: { discarded: 1, won: 0 },
+        expectedState1: "riichi",
       },
       {
         name: "副露中のプレイヤーに1,9牌が切られた場合に記録される",
@@ -110,17 +93,17 @@ describe("放銃統計コレクター", () => {
         tile: "1p",
         junme: 2,
         curRound: [{ 副露: 1 }, {}, {}, {}],
-        tenpaiFlags: [false, false, false, false],
         expectedSeat0: { discarded: 1, won: 0 },
+        expectedState0: "open",
       },
       {
-        name: "黙聴中のプレイヤーに5牌（赤5）が切られた場合に記録される",
+        name: "門前プレイヤーに5牌（赤5）が切られた場合に記録される",
         discardSeat: 1,
         tile: "0m",
         junme: 3.5,
         curRound: [{}, {}, {}, {}],
-        tenpaiFlags: [false, false, false, true], // seat3が黙聴
         expectedSeat3: { discarded: 1, won: 0 },
+        expectedState3: "other",
       },
       {
         name: "切ったプレイヤー自身は記録されない",
@@ -128,16 +111,17 @@ describe("放銃統計コレクター", () => {
         tile: "1z",
         junme: 1,
         curRound: [{ 立直: 1 }, { 立直: 2 }, {}, {}],
-        tenpaiFlags: [false, false, false, false],
-        expectedSeat0: { discarded: 0, won: 0 }, // seat0は切り手なので増えない
-        expectedSeat1: { discarded: 1, won: 0 }, // seat1（立直）は増える
+        expectedSeat0: { discarded: 0, won: 0 },
+        expectedState0: "riichi",
+        expectedSeat1: { discarded: 1, won: 0 },
+        expectedState1: "riichi",
       },
-    ])("$name", ({ discardSeat, tile, junme, curRound, tenpaiFlags, expectedSeat0, expectedSeat1, expectedSeat3 }) => {
+    ])("$name", ({ discardSeat, tile, junme, curRound, expectedSeat0, expectedState0, expectedSeat1, expectedState1, expectedSeat3, expectedState3 }) => {
       // Given
       const collector = new RonStatsCollector(4);
 
       // When
-      collector.recordDiscard(discardSeat, tile, junme, curRound, tenpaiFlags);
+      collector.recordDiscard(discardSeat, tile, junme, curRound);
 
       // Then
       const stats = collector.getStats();
@@ -145,28 +129,13 @@ describe("放銃統計コレクター", () => {
       const junmeCeil = Math.ceil(junme);
 
       if (expectedSeat0 !== undefined) {
-        const state = classifyPlayerState(curRound[0], tenpaiFlags[0]);
-        if (state) {
-          expect(stats[0]?.[junmeCeil]?.[state]?.[category] ?? { discarded: 0, won: 0 }).toEqual(expectedSeat0);
-        } else {
-          expect(stats[0]?.[junmeCeil]).toBeUndefined();
-        }
+        expect(stats[0]?.[junmeCeil]?.[expectedState0]?.[category] ?? { discarded: 0, won: 0 }).toEqual(expectedSeat0);
       }
       if (expectedSeat1 !== undefined) {
-        const state = classifyPlayerState(curRound[1], tenpaiFlags[1]);
-        if (state) {
-          expect(stats[1]?.[junmeCeil]?.[state]?.[category] ?? { discarded: 0, won: 0 }).toEqual(expectedSeat1);
-        } else {
-          expect(stats[1]?.[junmeCeil]).toBeUndefined();
-        }
+        expect(stats[1]?.[junmeCeil]?.[expectedState1]?.[category] ?? { discarded: 0, won: 0 }).toEqual(expectedSeat1);
       }
       if (expectedSeat3 !== undefined) {
-        const state = classifyPlayerState(curRound[3], tenpaiFlags[3]);
-        if (state) {
-          expect(stats[3]?.[junmeCeil]?.[state]?.[category] ?? { discarded: 0, won: 0 }).toEqual(expectedSeat3);
-        } else {
-          expect(stats[3]?.[junmeCeil]).toBeUndefined();
-        }
+        expect(stats[3]?.[junmeCeil]?.[expectedState3]?.[category] ?? { discarded: 0, won: 0 }).toEqual(expectedSeat3);
       }
     });
   });
@@ -179,7 +148,6 @@ describe("放銃統計コレクター", () => {
         tile: "5p",
         junme: 2,
         curRound: [{}, { 立直: 1 }, {}, {}],
-        tenpaiFlags: [false, false, false, false],
         expectedEntry: { discarded: 0, won: 1 },
         state: "riichi",
         category: "five",
@@ -190,28 +158,26 @@ describe("放銃統計コレクター", () => {
         tile: "9s",
         junme: 4,
         curRound: [{ 副露: 1 }, {}, {}, {}],
-        tenpaiFlags: [false, false, false, false],
         expectedEntry: { discarded: 0, won: 1 },
         state: "open",
         category: "terminals",
       },
       {
-        name: "黙聴中に放銃した場合に won が記録される",
+        name: "門前で放銃した場合に won が other として記録される",
         ronSeat: 2,
         tile: "4m",
         junme: 3,
         curRound: [{}, {}, {}, {}],
-        tenpaiFlags: [false, false, true, false],
         expectedEntry: { discarded: 0, won: 1 },
-        state: "tenpai",
+        state: "other",
         category: "inner",
       },
-    ])("$name", ({ ronSeat, tile, junme, curRound, tenpaiFlags, expectedEntry, state, category }) => {
+    ])("$name", ({ ronSeat, tile, junme, curRound, expectedEntry, state, category }) => {
       // Given
       const collector = new RonStatsCollector(4);
 
       // When
-      collector.recordRon(ronSeat, tile, junme, curRound, tenpaiFlags);
+      collector.recordRon(ronSeat, tile, junme, curRound);
 
       // Then
       const stats = collector.getStats();
@@ -224,15 +190,14 @@ describe("放銃統計コレクター", () => {
       // Given
       const collector = new RonStatsCollector(4);
       const curRound = [{}, { 立直: 1 }, {}, {}];
-      const tenpaiFlags = [false, false, false, false];
       const tile = "2z";
       // seat0 が巡目1.0 で切り、seat1（立直）が放銃
       const discardJunme = 1.0; // numDiscarded=0, numPlayers=4 → 0/4+1=1.0
 
       // When
-      collector.recordDiscard(0, tile, discardJunme, curRound, tenpaiFlags);
+      collector.recordDiscard(0, tile, discardJunme, curRound);
       // recordRon は numDiscarded++ 後なので (numDiscarded-1)/numPlayers+1 = (1-1)/4+1 = 1.0
-      collector.recordRon(1, tile, discardJunme, curRound, tenpaiFlags);
+      collector.recordRon(1, tile, discardJunme, curRound);
 
       // Then
       const stats = collector.getStats();
@@ -253,13 +218,13 @@ describe("放銃統計アキュムレータ", () => {
     // 1局目
     const collector1 = new RonStatsCollector(4);
     const curRound1 = [{}, { 立直: 1 }, {}, {}];
-    collector1.recordDiscard(0, "1z", 1, curRound1, [false, false, false, false]);
+    collector1.recordDiscard(0, "1z", 1, curRound1);
     accumulator.accumulate(collector1, accountIds);
 
     // 2局目（同じプレイヤーが同じ座席・同じ状態）
     const collector2 = new RonStatsCollector(4);
     const curRound2 = [{}, { 立直: 2 }, {}, {}];
-    collector2.recordDiscard(0, "1z", 1, curRound2, [false, false, false, false]);
+    collector2.recordDiscard(0, "1z", 1, curRound2);
     accumulator.accumulate(collector2, accountIds);
 
     // Then: プレイヤー1002（seat1）の巡目1・立直・字牌の discarded が累積されている
