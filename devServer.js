@@ -780,8 +780,8 @@ router.post("/v2/:type/player_extended_stats/:playerId", (req, res) => {
 });
 
 // ron_stats: 牌カテゴリ・状態・巡目別の放銃確率
-// GET /v2/:type/ron_stats/:playerId/:startDate/:endDate
-router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res) => {
+// GET /v2/:type/ron_stats/:playerId[/:startDate[/:endDate]]
+async function handleRonStats(req, res) {
   const typeConf = TYPE_MODES[req.params.type];
   if (!typeConf) {
     return res.status(404).json({ error: "type_not_found" });
@@ -794,13 +794,6 @@ router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res)
     ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
     : typeConf;
 
-  let startMs = parseInt(req.params.startDate, 10);
-  let endMs = parseInt(req.params.endDate, 10);
-  if (isNaN(startMs) || isNaN(endMs)) return res.status(400).json({ error: "invalid_date" });
-  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
-  const startTimeSec = Math.floor(startMs / 1000);
-  const endTimeSec = Math.ceil(endMs / 1000);
-
   const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
   const extendedDbMap = Object.fromEntries(
     Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
@@ -809,16 +802,23 @@ router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res)
   // basicDB を経由せず extendedDB を直接クエリ（buildRonStatsOutput に集計を委譲）
   // fields に "ronStats.{playerId}" を指定することで対象プレイヤーのデータのみ転送し高速化
   const playerIdStr = String(playerId);
+
+  const selector = { [`ronStats.${playerIdStr}`]: { $exists: true } };
+  if (req.params.startDate) {
+    let startMs = parseInt(req.params.startDate, 10);
+    let endMs = req.params.endDate ? parseInt(req.params.endDate, 10) : Date.now();
+    if (isNaN(startMs) || isNaN(endMs)) return res.status(400).json({ error: "invalid_date" });
+    if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
+    selector.start_time = { $gte: Math.floor(startMs / 1000), $lt: Math.ceil(endMs / 1000) };
+  }
+
   const extDocs = (
     await Promise.all(
       dbNames.map(async (db) => {
         const extDb = extendedDbMap[db];
         return axios
           .post(`${COUCH_BASE}/${extDb}/_find`, {
-            selector: {
-              start_time: { $gte: startTimeSec, $lt: endTimeSec },
-              [`ronStats.${playerIdStr}`]: { $exists: true },
-            },
+            selector,
             fields: [`ronStats.${playerIdStr}`],
             limit: 10000,
           })
@@ -829,7 +829,11 @@ router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", async (req, res)
   ).flat();
 
   return res.json(buildRonStatsOutput(extDocs, playerIdStr));
-});
+}
+
+router.get("/v2/:type/ron_stats/:playerId/:startDate/:endDate", handleRonStats);
+router.get("/v2/:type/ron_stats/:playerId/:startDate", handleRonStats);
+router.get("/v2/:type/ron_stats/:playerId", handleRonStats);
 
 // ハイライトゲーム
 router.get("/v2/:type/recent_highlight_games", (req, res) => res.json([]));
