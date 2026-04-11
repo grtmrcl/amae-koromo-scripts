@@ -454,27 +454,15 @@ router.get(["/v2/:type/search_player/:keyword", "/:type/search_player/:keyword"]
   return res.json(results);
 });
 
-// プレイヤー詳細統計
-router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", async (req, res) => {
-  const typeConf = TYPE_MODES[req.params.type];
-  if (!typeConf) {
-    return res.status(404).json({ error: "type_not_found" });
-  }
-
-  const playerId = parseInt(req.params.playerId, 10);
-  if (isNaN(playerId)) return res.status(400).json({ error: "invalid_player_id" });
-
-  const modes = req.query.mode
-    ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
-    : typeConf;
-
-  let startMs = parseInt(req.params.startDate, 10);
-  let endMs = parseInt(req.params.endDate, 10);
-  if (isNaN(startMs) || isNaN(endMs)) return res.status(400).json({ error: "invalid_date" });
-  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
-  const startTimeSec = Math.floor(startMs / 1000);
-  const endTimeSec = Math.ceil(endMs / 1000);
-
+/**
+ * extended_stats の DB ドキュメントを取得する
+ * @param {number} playerId
+ * @param {number[]} modes
+ * @param {number} startTimeSec
+ * @param {number} endTimeSec
+ * @returns {Promise<{ allBasicDocs: object[], allExtDocs: object[], modes: number[] }>}
+ */
+async function fetchExtendedStatsDocs(playerId, modes, startTimeSec, endTimeSec) {
   const dbNames = [...new Set(modes.map((m) => FRIEND_DBS[m]).filter(Boolean))];
   const extendedDbMap = Object.fromEntries(
     Object.entries(FRIEND_DBS).map(([, dbName]) => [dbName, dbName.replace("_basic", "_extended")])
@@ -487,7 +475,6 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     ],
   };
 
-  // basicDB と extendedDB を並列で取得
   const [basicDocsByDb, extDocsByDb] = await Promise.all([
     Promise.all(
       dbNames.map(async (db) => {
@@ -523,14 +510,113 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     ).then(Object.fromEntries),
   ]);
 
-  const allBasicDocs = Object.values(basicDocsByDb).flat();
+  return {
+    allBasicDocs: Object.values(basicDocsByDb).flat(),
+    allExtDocs: Object.values(extDocsByDb).flat(),
+  };
+}
+
+/**
+ * extended_stats のメモリキャッシュ（stale-while-revalidate）
+ *
+ * キー: `${playerId}:${sortedModes}:${startTimeSec}`
+ * endTimeSec はフロントから「現在時刻」が送られるため毎回異なる → キーに含めない。
+ * その代わりキャッシュは定期的（CACHE_TTL_MS ごと）に再取得する。
+ *
+ * - キャッシュ HIT: 即座にキャッシュ値を返し、TTL 切れなら非同期でバックグラウンド更新
+ * - キャッシュ MISS: 同期的に取得して返す
+ */
+const EXTENDED_STATS_CACHE = new Map(); // key -> { stats, fetchedAt }
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5分
+
+function extendedStatsCacheKey(playerId, modes, startTimeSec) {
+  return `${playerId}:${[...modes].sort().join(",")}:${startTimeSec}`;
+}
+
+async function getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec) {
+  const key = extendedStatsCacheKey(playerId, modes, startTimeSec);
+  const cached = EXTENDED_STATS_CACHE.get(key);
+  const now = Date.now();
+
+  if (cached) {
+    if (now - cached.fetchedAt >= CACHE_TTL_MS) {
+      // TTL 切れ: バックグラウンドで更新（今回のレスポンスはキャッシュをそのまま返す）
+      fetchExtendedStatsDocs(playerId, modes, startTimeSec, endTimeSec)
+        .then(({ allBasicDocs, allExtDocs }) => {
+          const playedModes = [...new Set(
+            allBasicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
+          )];
+          EXTENDED_STATS_CACHE.set(key, {
+            stats: buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes),
+            fetchedAt: Date.now(),
+          });
+        })
+        .catch((e) => console.error("[cache] バックグラウンド更新失敗:", e.message));
+    }
+    return cached.stats;
+  }
+
+  // キャッシュ MISS: 同期取得
+  const { allBasicDocs, allExtDocs } = await fetchExtendedStatsDocs(playerId, modes, startTimeSec, endTimeSec);
   const playedModes = [...new Set(
     allBasicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
   )];
-  const allExtDocs = Object.values(extDocsByDb).flat();
+  const stats = buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes);
+  EXTENDED_STATS_CACHE.set(key, { stats, fetchedAt: now });
+  return stats;
+}
 
-  return res.json(buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes));
+// プレイヤー詳細統計
+router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", async (req, res) => {
+  const typeConf = TYPE_MODES[req.params.type];
+  if (!typeConf) {
+    return res.status(404).json({ error: "type_not_found" });
+  }
+
+  const playerId = parseInt(req.params.playerId, 10);
+  if (isNaN(playerId)) return res.status(400).json({ error: "invalid_player_id" });
+
+  const modes = req.query.mode
+    ? req.query.mode.split(/[,.-]/).map((x) => parseInt(x, 10)).filter((m) => typeConf.includes(m))
+    : typeConf;
+
+  let startMs = parseInt(req.params.startDate, 10);
+  let endMs = parseInt(req.params.endDate, 10);
+  if (isNaN(startMs) || isNaN(endMs)) return res.status(400).json({ error: "invalid_date" });
+  if (startMs > endMs) [startMs, endMs] = [endMs, startMs];
+  const startTimeSec = Math.floor(startMs / 1000);
+  const endTimeSec = Math.ceil(endMs / 1000);
+
+  return res.json(await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec));
 });
+
+/**
+ * TARGET_ACCOUNT_IDS の各プレイヤーの extended_stats を起動時にプリロードする
+ */
+async function warmupExtendedStatsCache() {
+  const ids = process.env.TARGET_ACCOUNT_IDS
+    ? process.env.TARGET_ACCOUNT_IDS.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
+    : [];
+  if (!ids.length) return;
+
+  // startTimeSec: フロントと同じ 2010-01-01T00:00:00.000Z 起点
+  const startTimeSec = Math.floor(new Date("2010-01-01T00:00:00.000Z").getTime() / 1000);
+  const endTimeSec = Math.ceil(Date.now() / 1000);
+
+  console.log(`[warmup] ${ids.length} プレイヤー × ${Object.keys(TYPE_MODES).length} タイプのキャッシュを構築中...`);
+  await Promise.all(
+    ids.flatMap((playerId) =>
+      Object.entries(TYPE_MODES).map(async ([, modes]) => {
+        try {
+          await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec);
+        } catch (e) {
+          console.error(`[warmup] playerId=${playerId} modes=${modes} 失敗:`, e.message);
+        }
+      })
+    )
+  );
+  console.log("[warmup] キャッシュ構築完了");
+}
 
 /**
  * プレイヤー詳細統計を計算する純粋関数
@@ -890,7 +976,15 @@ app.use("/api/", router);
 app.use("/api-test/", router);
 app.use("/", router);
 
-module.exports = { buildRonStatsOutput, buildRonStatsSelector, buildExtendedStats };
+module.exports = {
+  buildRonStatsOutput,
+  buildRonStatsSelector,
+  buildExtendedStats,
+  getExtendedStatsWithCache,
+  warmupExtendedStatsCache,
+  EXTENDED_STATS_CACHE,
+  extendedStatsCacheKey,
+};
 
 if (require.main === module) {
   const port = parseInt(process.env.PORT, 10) || 3000;
@@ -900,5 +994,6 @@ if (require.main === module) {
     console.log(`[devServer] CouchDB: ${COUCHDB_PROTO}://${COUCHDB_SERVER}`);
     await ensureIndexes();
     console.log(`[devServer] インデックスを確認しました`);
+    warmupExtendedStatsCache().catch((e) => console.error("[warmup] 予期しないエラー:", e));
   });
 }

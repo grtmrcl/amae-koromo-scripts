@@ -8,7 +8,14 @@ jest.mock("../env", () => ({
   COUCHDB_URL: "http://admin:password@localhost:5984/majsoul",
 }));
 
-const { buildRonStatsOutput, buildRonStatsSelector, buildExtendedStats } = require("../devServer");
+const {
+  buildRonStatsOutput,
+  buildRonStatsSelector,
+  buildExtendedStats,
+  getExtendedStatsWithCache,
+  EXTENDED_STATS_CACHE,
+  extendedStatsCacheKey,
+} = require("../devServer");
 
 // テスト用ヘルパー: 空の state オブジェクト（全巡目空）
 const emptyCats = { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} };
@@ -321,5 +328,87 @@ describe("立直ツモ率の計算", () => {
 
     // Then
     expect(result.riichi_tsumo_rate).toBe(expected);
+  });
+});
+
+// ── extended_stats キャッシュ ────────────────────────────��───────
+
+// fetchExtendedStatsDocs（axios使用）をモックして純粋にキャッシュ動作をテスト
+jest.mock("axios", () => ({
+  default: {
+    post: jest.fn().mockResolvedValue({ data: { docs: [] } }),
+  },
+}));
+
+describe("extended_stats キャッシュ（stale-while-revalidate）", () => {
+  beforeEach(() => {
+    EXTENDED_STATS_CACHE.clear();
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("初回リクエストはキャッシュに保存され、同一キーの2回目は同じオブジェクトが返る", async () => {
+    // Given: キャッシュ空
+    const playerId = 9999;
+    const modes = [1, 2];
+    const startTimeSec = 1262304000;
+    const endTimeSec = Math.ceil(Date.now() / 1000);
+
+    // When: 2回リクエスト
+    const first = await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec);
+    const second = await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec);
+
+    // Then: 同一オブジェクト（キャッシュから返された）
+    expect(second).toBe(first);
+    expect(EXTENDED_STATS_CACHE.has(extendedStatsCacheKey(playerId, modes, startTimeSec))).toBe(true);
+  });
+
+  test("TTL 内は axios を再呼び出しせずキャッシュを返す", async () => {
+    const axios = require("axios").default;
+    const playerId = 8888;
+    const modes = [1];
+    const startTimeSec = 1262304000;
+    const endTimeSec = Math.ceil(Date.now() / 1000);
+
+    // Given: 1回目でキャッシュに保存
+    await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec);
+    const callCountAfterFirst = axios.post.mock.calls.length;
+
+    // When: TTL 内に再リクエスト（時間を進めない）
+    await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec);
+
+    // Then: axios は追加呼び出しされていない
+    expect(axios.post.mock.calls.length).toBe(callCountAfterFirst);
+  });
+
+  test("TTL 経過後はキャッシュ値を即返し、バックグラウンドで更新を開始する", async () => {
+    const axios = require("axios").default;
+    const playerId = 7777;
+    const modes = [1];
+    const startTimeSec = 1262304000;
+    const endTimeSec = Math.ceil(Date.now() / 1000);
+
+    // Given: キャッシュを温める
+    const first = await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec);
+    const callCountAfterWarmup = axios.post.mock.calls.length;
+
+    // TTL を過ぎた時間に進める（5分 + 1ms）
+    jest.advanceTimersByTime(5 * 60 * 1000 + 1);
+
+    // When: TTL 切れ後にリクエスト
+    const stale = await getExtendedStatsWithCache(playerId, modes, startTimeSec, endTimeSec);
+
+    // Then: 即座に古いキャッシュを返す（同一オブジェクト）
+    expect(stale).toBe(first);
+
+    // バックグラウンド更新の Promise が解決されるまで待つ
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // バックグラウンドで axios が再呼び出しされている
+    expect(axios.post.mock.calls.length).toBeGreaterThan(callCountAfterWarmup);
   });
 });
