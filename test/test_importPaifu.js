@@ -504,3 +504,111 @@ describe("importPaifu の RESET_DB オプション", () => {
     expect(mockDestroyDatabases).not.toHaveBeenCalled();
   });
 });
+
+describe("importPaifu の targetFiles オプション", () => {
+  let mockReadFileSync;
+  let mockReaddirSync;
+
+  function setupMocksWithFs() {
+    jest.resetModules();
+    mockDestroyDatabases = jest.fn().mockResolvedValue(undefined);
+    mockReadFileSync = jest.fn();
+    mockReaddirSync = jest.fn();
+    jest.mock("../couchStorage", () => {
+      const MockCouchStorage = jest.fn().mockImplementation(() => ({
+        destroyDatabases: mockDestroyDatabases,
+        ensureIndexes: jest.fn().mockResolvedValue(undefined),
+        findNonExistentRecordsFast: jest.fn().mockResolvedValue([{ uuid: "dummy" }]),
+        saveGame: jest.fn().mockResolvedValue(undefined),
+        saveRoundData: jest.fn().mockResolvedValue(undefined),
+        triggerViewRefresh: jest.fn().mockResolvedValue(undefined),
+      }));
+      MockCouchStorage.DEFAULT_MODE = "GAME";
+      return { CouchStorage: MockCouchStorage, MODE_GAME: "GAME" };
+    });
+    jest.mock("fs", () => ({
+      ...jest.requireActual("fs"),
+      readdirSync: mockReaddirSync,
+      readFileSync: mockReadFileSync,
+    }));
+    return require("../importPaifu");
+  }
+
+  let mockDestroyDatabases;
+
+  afterEach(() => {
+    jest.resetModules();
+    jest.restoreAllMocks();
+  });
+
+  test.each([
+    {
+      name: "targetFiles 未指定のとき、ディレクトリ内の全ファイルを対象にする",
+      // Given
+      targetFiles: null,
+      readdirFiles: ["220101-aaa.json", "220102-bbb.json"],
+      // Then
+      expectedReadCount: 2,
+    },
+    {
+      name: "targetFiles に1件指定したとき、そのファイルのみを対象にする",
+      // Given
+      targetFiles: ["220101-aaa.json"],
+      readdirFiles: ["220101-aaa.json", "220102-bbb.json"],
+      // Then
+      expectedReadCount: 1,
+    },
+    {
+      name: "targetFiles に .json なしで指定したとき、自動で拡張子が補完される",
+      // Given
+      targetFiles: ["220101-aaa"],
+      readdirFiles: ["220101-aaa.json", "220102-bbb.json"],
+      // Then
+      expectedReadCount: 1,
+    },
+    {
+      name: "targetFiles に複数ファイルを指定したとき、指定したファイルのみを対象にする",
+      // Given
+      targetFiles: ["220101-aaa.json", "220102-bbb.json"],
+      readdirFiles: ["220101-aaa.json", "220102-bbb.json", "220103-ccc.json"],
+      // Then
+      expectedReadCount: 2,
+    },
+  ])("$name", async ({ targetFiles, readdirFiles, expectedReadCount }) => {
+    // Given: fs をモックし、readdirSync が readdirFiles を返すようにする
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue(readdirFiles);
+    // readFileSync は category !== 1 のデータを返す（インポート処理をスキップさせる）
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) {
+        return JSON.stringify({ head: { uuid: "dummy", accounts: [], config: { category: 2 }, result: { players: [] } }, data: { name: ".lq.GameDetailRecords", data: { records: [] } } });
+      }
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+
+    // When: importPaifu を実行
+    await importPaifu({ targetFiles });
+
+    // Then: 指定件数分だけ readFileSync が呼ばれる
+    const jsonReadCount = mockReadFileSync.mock.calls.filter(([p]) => typeof p === "string" && p.endsWith(".json")).length;
+    expect(jsonReadCount).toBe(expectedReadCount);
+  });
+
+  test("存在しないファイルを指定したとき、エラーログを出力してスキップする", async () => {
+    // Given: readFileSync が ENOENT エラーを投げる
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue([]);
+    const enoentError = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) throw enoentError;
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    // When: 存在しないファイルを targetFiles に指定して実行
+    await importPaifu({ targetFiles: ["nonexistent.json"] });
+
+    // Then: "File not found" のエラーログが出力される
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringMatching(/File not found.*nonexistent\.json/));
+  });
+});

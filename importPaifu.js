@@ -209,7 +209,7 @@ function buildRecordDataFromJson({ data, game }) {
                 if (seat === lastDiscardSeat && numLosingPlayers === 1 && lastDiscardTile) {
                   const ronJunme = (numDiscarded - 1) / numPlayers + 1;
                   ronStatsCollectors[ronStatsCollectors.length - 1].recordRon(
-                    seat,
+                    x.seat,
                     lastDiscardTile,
                     ronJunme,
                     curRound
@@ -285,7 +285,7 @@ function getStoreForFriend(groups, gameData) {
   return groups.friend.store;
 }
 
-async function importPaifu() {
+async function importPaifu({ targetFiles = null } = {}) {
   const groups = {
     friend: { store: new CouchStorage({ suffix: "_friend", skipSetup: false }) },
     friend3: { store: new CouchStorage({ suffix: "_friend3", skipSetup: false }) },
@@ -309,7 +309,9 @@ async function importPaifu() {
   }
   console.log("CouchDB indexes ensured.");
 
-  const files = fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
+  const files = targetFiles
+    ? targetFiles.map((f) => (f.endsWith(".json") ? f : `${f}.json`))
+    : fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
   console.log(`Found ${files.length} paifu files in ${PAIFU_DIR}`);
 
   const allStores = Object.values(groups).map((g) => g.store);
@@ -320,7 +322,11 @@ async function importPaifu() {
     try {
       parsed = JSON.parse(fs.readFileSync(filePath, { encoding: "utf-8" }));
     } catch (e) {
-      console.error(`Failed to parse ${file}:`, e);
+      if (e.code === "ENOENT") {
+        console.error(`File not found: ${file}`);
+      } else {
+        console.error(`Failed to parse ${file}:`, e);
+      }
       continue;
     }
 

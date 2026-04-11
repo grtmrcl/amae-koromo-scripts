@@ -142,23 +142,23 @@ class RonStatsCollector {
   }
 
   /**
-   * 和了（放銃）イベントを記録する
+   * 和了（ロン）イベントを記録する
    *
    * RecordHule の処理中（放銃確定後）に呼ぶ。
    * junme は放銃牌の RecordDiscardTile 時と同じ巡目を渡すこと
    * （RecordHule 時点では numDiscarded がインクリメント済みのため呼び出し側で調整が必要）。
    *
-   * @param {number} ronSeat - 放銃したプレイヤーの座席（lastDiscardSeat）
+   * @param {number} huleSeat - 和了したプレイヤーの座席
    * @param {string} tile - 放銃牌
    * @param {number} junme - 放銃牌を切った時点の巡目
    * @param {{ 立直?: number, 副露?: number }[]} curRound - 全プレイヤーの現在のラウンドデータ
    */
-  recordRon(ronSeat, tile, junme, curRound) {
+  recordRon(huleSeat, tile, junme, curRound) {
     const category = classifyTile(tile);
     const roundedJunme = Math.ceil(junme);
 
-    const state = classifyPlayerState(curRound[ronSeat]);
-    const entry = this._getEntry(ronSeat, roundedJunme, state, category);
+    const state = classifyPlayerState(curRound[huleSeat]);
+    const entry = this._getEntry(huleSeat, roundedJunme, state, category);
     entry.won++;
   }
 
