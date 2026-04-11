@@ -209,7 +209,7 @@ function buildRecordDataFromJson({ data, game }) {
                 if (seat === lastDiscardSeat && numLosingPlayers === 1 && lastDiscardTile) {
                   const ronJunme = (numDiscarded - 1) / numPlayers + 1;
                   ronStatsCollectors[ronStatsCollectors.length - 1].recordRon(
-                    seat,
+                    x.seat,
                     lastDiscardTile,
                     ronJunme,
                     curRound

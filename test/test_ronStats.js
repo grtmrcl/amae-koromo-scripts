@@ -140,11 +140,11 @@ describe("放銃統計コレクター", () => {
     });
   });
 
-  describe("放銃の記録", () => {
+  describe("和了の記録", () => {
     test.each([
       {
-        name: "立直中に放銃した場合に won が記録される",
-        ronSeat: 1,
+        name: "立直中の和了者に won が記録される",
+        huleSeat: 1,
         tile: "5p",
         junme: 2,
         curRound: [{}, { 立直: 1 }, {}, {}],
@@ -153,8 +153,8 @@ describe("放銃統計コレクター", () => {
         category: "five",
       },
       {
-        name: "副露中に放銃した場合に won が記録される",
-        ronSeat: 0,
+        name: "副露中の和了者に won が記録される",
+        huleSeat: 0,
         tile: "9s",
         junme: 4,
         curRound: [{ 副露: 1 }, {}, {}, {}],
@@ -163,8 +163,8 @@ describe("放銃統計コレクター", () => {
         category: "terminals",
       },
       {
-        name: "門前で放銃した場合に won が other として記録される",
-        ronSeat: 2,
+        name: "門前の和了者に won が other として記録される",
+        huleSeat: 2,
         tile: "4m",
         junme: 3,
         curRound: [{}, {}, {}, {}],
@@ -172,26 +172,26 @@ describe("放銃統計コレクター", () => {
         state: "other",
         category: "inner",
       },
-    ])("$name", ({ ronSeat, tile, junme, curRound, expectedEntry, state, category }) => {
+    ])("$name", ({ huleSeat, tile, junme, curRound, expectedEntry, state, category }) => {
       // Given
       const collector = new RonStatsCollector(4);
 
       // When
-      collector.recordRon(ronSeat, tile, junme, curRound);
+      collector.recordRon(huleSeat, tile, junme, curRound);
 
       // Then
       const stats = collector.getStats();
-      expect(stats[ronSeat][junme][state][category]).toEqual(expectedEntry);
+      expect(stats[huleSeat][junme][state][category]).toEqual(expectedEntry);
     });
   });
 
   describe("discarded と won の巡目一致", () => {
-    test("同一巡目に切られた牌で放銃した場合、discarded と won が同じ巡目バケツに記録される", () => {
+    test("同一巡目に切られた牌で和了した場合、discarded と won が同じ巡目バケツに記録される", () => {
       // Given
       const collector = new RonStatsCollector(4);
       const curRound = [{}, { 立直: 1 }, {}, {}];
       const tile = "2z";
-      // seat0 が巡目1.0 で切り、seat1（立直）が放銃
+      // seat0 が巡目1.0 で切り、seat1（立直）が和了
       const discardJunme = 1.0; // numDiscarded=0, numPlayers=4 → 0/4+1=1.0
 
       // When
