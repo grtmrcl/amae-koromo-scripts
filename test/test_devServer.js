@@ -332,12 +332,12 @@ describe("立直ツモ率の計算", () => {
 });
 
 
-// ── buildExtendedStats: effective_uradra_per_riichi_win ──────────
+// ── buildExtendedStats: effective_uradora_per_riichi_win ──────────
 
 describe('立直和了あたり有効裏ドラ枚数の計算', () => {
   test.each([
     {
-      name: '立直和了がない場合は effective_uradra_per_riichi_win が 0 になる',
+      name: '立直和了がない場合は effective_uradora_per_riichi_win が 0 になる',
       extDoc: { accounts: [1001], data: [makeKyoku({})] },
       expected: 0,
     },
@@ -381,7 +381,7 @@ describe('立直和了あたり有効裏ドラ枚数の計算', () => {
     const result = buildExtendedStats([], [extDoc], 1001, []);
 
     // Then
-    expect(result.effective_uradra_per_riichi_win).toBe(expected);
+    expect(result.effective_uradora_per_riichi_win).toBe(expected);
   });
 });
 // ── extended_stats キャッシュ ────────────────────────────��───────

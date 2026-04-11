@@ -851,7 +851,7 @@ function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
     draw_tenpai_rate: ryukyokuCount > 0 ? ryukyokuTenpaiCount / ryukyokuCount : 0,
     ippatsu_rate: richiWinCount > 0 ? ippatsuCount / richiWinCount : 0,
     ura_rate: richiWinCount > 0 ? uraCount / richiWinCount : 0,
-    effective_uradra_per_riichi_win: richiWinCount > 0 ? effectiveUradoraSum / richiWinCount : 0,
+    effective_uradora_per_riichi_win: richiWinCount > 0 ? effectiveUradoraSum / richiWinCount : 0,
     bombed_rate: oyaCount > 0 ? bazoCount / oyaCount : 0,
     avg_bombed_point: bazoCount > 0 ? Math.round(bazoPointSum / bazoCount) : 0,
     deal_in_riichi_rate: ronCount > 0 ? ronTimeRichiCount / ronCount : 0,
