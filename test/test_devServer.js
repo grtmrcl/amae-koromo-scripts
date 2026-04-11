@@ -331,6 +331,59 @@ describe("立直ツモ率の計算", () => {
   });
 });
 
+
+// ── buildExtendedStats: effective_uradra_per_riichi_win ──────────
+
+describe('立直和了あたり有効裏ドラ枚数の計算', () => {
+  test.each([
+    {
+      name: '立直和了がない場合は effective_uradra_per_riichi_win が 0 になる',
+      extDoc: { accounts: [1001], data: [makeKyoku({})] },
+      expected: 0,
+    },
+    {
+      name: '有効裏ドラが記録されていない立直和了の場合は 0 になる（旧データ互換）',
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 立直: 2, 和: [8000, [33], 4] })],
+      },
+      expected: 0,
+    },
+    {
+      name: '有効裏ドラ1枚の立直和了: 1.0 になる',
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 立直: 2, 和: [8000, [33], 4], 有効裏ドラ: 1 })],
+      },
+      expected: 1,
+    },
+    {
+      name: '2局・有効裏ドラ合計3枚: 1.5 になる',
+      extDoc: {
+        accounts: [1001],
+        data: [
+          makeKyoku({ 立直: 2, 和: [8000, [33, 33], 4], 有効裏ドラ: 2 }),
+          makeKyoku({ 立直: 3, 和: [5800, [33], 5], 有効裏ドラ: 1 }),
+        ],
+      },
+      expected: 1.5,
+    },
+    {
+      name: '非立直和了の有効裏ドラは集計されない',
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 和: [2000, [], 3], 自摸: true, 有効裏ドラ: 2 })],
+      },
+      expected: 0,
+    },
+  ])('$name', ({ extDoc, expected }) => {
+    // When
+    const result = buildExtendedStats([], [extDoc], 1001, []);
+
+    // Then
+    expect(result.effective_uradra_per_riichi_win).toBe(expected);
+  });
+});
 // ── extended_stats キャッシュ ────────────────────────────��───────
 
 // fetchExtendedStatsDocs（axios使用）をモックして純粋にキャッシュ動作をテスト

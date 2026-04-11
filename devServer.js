@@ -661,6 +661,7 @@ function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
   let maxFanCount = 0;
   let wrichiCount = 0;
   let uraCount = 0;
+  let effectiveUradoraSum = 0;
   let ronTimeRichiCount = 0;
   let ronTimeFuuroCount = 0;
   let ronToRichiCount = 0;
@@ -755,6 +756,7 @@ function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
                 if (p["自摸"] === true) richiTsumoCount++;
                 if (fans.includes(FAN_IPPATSU)) ippatsuCount++;
                 if (fans.includes(FAN_URA)) uraCount++;
+                if (p["有効裏ドラ"] != null) effectiveUradoraSum += p["有効裏ドラ"];
               }
               if (fuuro >= 1) fuuroWinCount++;
             }
@@ -849,6 +851,7 @@ function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
     draw_tenpai_rate: ryukyokuCount > 0 ? ryukyokuTenpaiCount / ryukyokuCount : 0,
     ippatsu_rate: richiWinCount > 0 ? ippatsuCount / richiWinCount : 0,
     ura_rate: richiWinCount > 0 ? uraCount / richiWinCount : 0,
+    effective_uradra_per_riichi_win: richiWinCount > 0 ? effectiveUradoraSum / richiWinCount : 0,
     bombed_rate: oyaCount > 0 ? bazoCount / oyaCount : 0,
     avg_bombed_point: bazoCount > 0 ? Math.round(bazoPointSum / bazoCount) : 0,
     deal_in_riichi_rate: ronCount > 0 ? ronTimeRichiCount / ronCount : 0,

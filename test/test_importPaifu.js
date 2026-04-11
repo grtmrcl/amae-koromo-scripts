@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend } = require("../importPaifu");
+const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, calcEffectiveUraDora } = require("../importPaifu");
 const { CouchStorage, MODE_GAME } = require("../couchStorage");
 const { RonStatsAccumulator, PLAYER_STATES, TILE_CATEGORIES } = require("../ronStats");
 
@@ -610,5 +610,230 @@ describe("importPaifu の targetFiles オプション", () => {
 
     // Then: "File not found" のエラーログが出力される
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringMatching(/File not found.*nonexistent\.json/));
+  });
+});
+
+// fan ID 定数（importPaifu.js と対応）
+const FAN_URA = 33;    // 裏ドラ
+const FAN_TSUMO = 29;  // 門前清自摸和
+const FAN_PINFU = 3;   // 平和
+const FAN_RIICHI = 1;  // 立直（例示用）
+
+// fans 配列ビルダー: {id, count} の配列から id を count 枚展開した配列を生成
+function buildFanIds(specs) {
+  return specs.flatMap(({ id, count }) => Array(count).fill(id));
+}
+
+describe("calcEffectiveUraDora: 有効裏ドラ枚数の計算", () => {
+  describe("条件1: 裏ドラ除外fansが5以下/7/10/12のとき、6/8/11/13に達する裏ドラが有効", () => {
+    test.each([
+      {
+        name: "仕様例1: base=5, ura=2 → 閾値6まで1枚有効",
+        // Given
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 5 }, { id: FAN_URA, count: 2 }]),
+        fu: 30,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "仕様例2: base=3, ura=5 → 最大到達閾値8まで5枚全て有効",
+        // Given
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 3 }, { id: FAN_URA, count: 5 }]),
+        fu: 30,
+        // Then
+        expected: 5,
+      },
+      {
+        name: "仕様例3: base=5, ura=5 → 閾値8まで3枚有効（10は到達するが8が最大有効閾値）",
+        // Given
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 5 }, { id: FAN_URA, count: 5 }]),
+        fu: 30,
+        // Then
+        expected: 3,
+      },
+      {
+        name: "base=7, ura=1 → 閾値8まで1枚有効",
+        // Given
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 7 }, { id: FAN_URA, count: 1 }]),
+        fu: 30,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "base=10, ura=1 → 閾値11まで1枚有効",
+        // Given
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 10 }, { id: FAN_URA, count: 1 }]),
+        fu: 30,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "base=12, ura=1 → 閾値13まで1枚有効",
+        // Given
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 12 }, { id: FAN_URA, count: 1 }]),
+        fu: 30,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "裏ドラを加えても閾値に届かない場合は0",
+        // Given: base=5, ura=0 → 裏ドラなし
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 5 }]),
+        fu: 30,
+        // Then
+        expected: 0,
+      },
+    ])("$name", ({ fanIds, fu, expected }) => {
+      // When
+      const result = calcEffectiveUraDora(fanIds, fu);
+
+      // Then
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe("条件2: 合計fansが3以下のとき裏ドラ全て有効", () => {
+    test.each([
+      {
+        name: "合計fans=2のとき裏ドラ全て(2枚)が有効",
+        // Given: base=1, ura=1, total=2
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 1 }, { id: FAN_URA, count: 1 }]),
+        fu: 30,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "合計fans=3のとき裏ドラ全て(2枚)が有効",
+        // Given: base=1, ura=2, total=3
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 1 }, { id: FAN_URA, count: 2 }]),
+        fu: 30,
+        // Then
+        expected: 2,
+      },
+      {
+        name: "合計fans=4のとき条件2は適用されない（fu>=60で条件3も不適用）",
+        // Given: base=3, ura=1, total=4, fu=60 → 条件2・3・4いずれも不適用、条件1: total=4<6
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 3 }, { id: FAN_URA, count: 1 }]),
+        fu: 60,
+        // Then
+        expected: 0,
+      },
+    ])("$name", ({ fanIds, fu, expected }) => {
+      // When
+      const result = calcEffectiveUraDora(fanIds, fu);
+
+      // Then
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe("条件3: fu<60のとき、fans3→4に上がる裏ドラが有効", () => {
+    test.each([
+      {
+        name: "仕様例: fu=50, base=2, ura=2 → fans3→4の1枚が有効",
+        // Given
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 2 }, { id: FAN_URA, count: 2 }]),
+        fu: 50,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "fu=60のとき条件3は適用されない",
+        // Given: base=2, ura=2, fu=60 → 条件3不適用、条件1も不適用（total=4<6）
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 2 }, { id: FAN_URA, count: 2 }]),
+        fu: 60,
+        // Then
+        expected: 0,
+      },
+      {
+        name: "fu<60でもbaseFans>=4のとき条件3は適用されない",
+        // Given: base=4, ura=1, fu=30 → すでに4fans以上なので3→4は発生しない
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 4 }, { id: FAN_URA, count: 1 }]),
+        fu: 30,
+        // Then
+        expected: 0,
+      },
+    ])("$name", ({ fanIds, fu, expected }) => {
+      // When
+      const result = calcEffectiveUraDora(fanIds, fu);
+
+      // Then
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe("条件4: ツモ+平和役あり、fans4→5に上がる裏ドラが有効", () => {
+    test.each([
+      {
+        name: "ツモ+平和あり、base=4, ura=1 → fans4→5の1枚が有効",
+        // Given
+        fanIds: buildFanIds([
+          { id: FAN_RIICHI, count: 2 },
+          { id: FAN_TSUMO, count: 1 },
+          { id: FAN_PINFU, count: 1 },
+          { id: FAN_URA, count: 1 },
+        ]),
+        fu: 30,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "ツモのみ（平和なし）のとき条件4は適用されない",
+        // Given: base=4(riichi*3+tsumo), ura=1, fu=60 → 条件3不適用(fu>=60)、条件4不適用(平和なし)
+        fanIds: buildFanIds([
+          { id: FAN_RIICHI, count: 3 },
+          { id: FAN_TSUMO, count: 1 },
+          { id: FAN_URA, count: 1 },
+        ]),
+        fu: 60,
+        // Then
+        expected: 0,
+      },
+      {
+        name: "平和のみ（ツモなし）のとき条件4は適用されない",
+        // Given: base=4(riichi*3+pinfu), ura=1, fu=60 → 条件3不適用(fu>=60)、条件4不適用(ツモなし)
+        fanIds: buildFanIds([
+          { id: FAN_RIICHI, count: 3 },
+          { id: FAN_PINFU, count: 1 },
+          { id: FAN_URA, count: 1 },
+        ]),
+        fu: 60,
+        // Then
+        expected: 0,
+      },
+    ])("$name", ({ fanIds, fu, expected }) => {
+      // When
+      const result = calcEffectiveUraDora(fanIds, fu);
+
+      // Then
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe("条件の組み合わせと優先順位", () => {
+    test.each([
+      {
+        name: "裏ドラが0枚のとき常に0を返す",
+        // Given: 裏ドラなし
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 5 }]),
+        fu: 30,
+        // Then
+        expected: 0,
+      },
+      {
+        name: "条件1と条件3が両立するとき大きい方を返す",
+        // Given: base=2, ura=4, fu=50 → 条件3: min(4,4-2)=2, 条件1: total=6→threshold6達成→min(4,6-2)=4
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 2 }, { id: FAN_URA, count: 4 }]),
+        fu: 50,
+        // Then
+        expected: 4,
+      },
+    ])("$name", ({ fanIds, fu, expected }) => {
+      // When
+      const result = calcEffectiveUraDora(fanIds, fu);
+
+      // Then
+      expect(result).toBe(expected);
+    });
   });
 });

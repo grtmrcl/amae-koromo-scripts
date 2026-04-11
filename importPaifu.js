@@ -24,6 +24,61 @@ function isTargetGame(gameData) {
   return gameData.accounts.every((account) => TARGET_ACCOUNT_IDS.has(account.account_id));
 }
 
+// fan ID 定数
+const FAN_ID_URA = 33;    // 裏ドラ
+const FAN_ID_TSUMO = 29;  // 門前清自摸和
+const FAN_ID_PINFU = 3;   // 平和
+
+/**
+ * 有効裏ドラ枚数を計算する。
+ * 立直和了に対し、点数が上昇する区切りに寄与する裏ドラの枚数を返す。
+ * 呼び出し元で立直和了（liqi === true）を確認してから呼ぶこと。
+ *
+ * @param {number[]} fanIds - 和了役IDの配列（id を val 枚展開済み）
+ * @param {number} fu - 符
+ * @returns {number} 有効裏ドラ枚数
+ */
+function calcEffectiveUraDora(fanIds, fu) {
+  const uraCount = fanIds.filter((id) => id === FAN_ID_URA).length;
+  if (uraCount === 0) return 0;
+
+  const baseFans = fanIds.length - uraCount;
+  const totalFans = fanIds.length;
+
+  // 条件2: 合計fans が 3 以下のとき、裏ドラ全て有効
+  if (totalFans <= 3) return uraCount;
+
+  // 条件3: fu < 60 かつ fans が 3→4 になるときの裏ドラ
+  // 条件4: 役にツモと平和があるとき、fans が 4→5 になるときの裏ドラ
+  const hasTsumo = fanIds.includes(FAN_ID_TSUMO);
+  const hasPinfu = fanIds.includes(FAN_ID_PINFU);
+  let extraEffective = 0;
+
+  if (fu < 60 && baseFans < 4 && totalFans >= 4) {
+    // fans が 3→4 に上がる裏ドラ枚数（baseFansが3未満でも3に達した後の4への1枚のみ有効）
+    const neededFor4 = 4 - Math.max(baseFans, 3);
+    extraEffective = Math.min(uraCount, neededFor4);
+  }
+
+  if (hasTsumo && hasPinfu && baseFans < 5 && totalFans >= 5) {
+    // fans が 4→5 に上がる裏ドラ枚数（baseFansが4未満でも4に達した後の5への1枚のみ有効）
+    const neededFor5 = 5 - Math.max(baseFans, 4);
+    extraEffective = Math.max(extraEffective, Math.min(uraCount, neededFor5));
+  }
+
+  // 条件1: 裏ドラ除外fansが5以下/7/10/12のとき、裏ドラを加えると6/8/11/13に達する裏ドラ
+  // 到達できる最大の点数区切り閾値までに必要な枚数を有効とする
+  const THRESHOLDS = [6, 8, 11, 13];
+  const reachableThresholds = THRESHOLDS.filter((t) => t > baseFans && t <= totalFans);
+  let condition1Effective = 0;
+  if (reachableThresholds.length > 0) {
+    const maxT = reachableThresholds[reachableThresholds.length - 1];
+    condition1Effective = Math.min(uraCount, maxT - baseFans);
+  }
+
+  return Math.max(condition1Effective, extraEffective);
+}
+
 // paifu/*.json の data フィールド（デコード済みJSON）からラウンドデータを生成する
 // index.js の buildRecordData に相当するが、Protobuf バイナリではなく JSON オブジェクトを受け取る
 function buildRecordDataFromJson({ data, game }) {
@@ -166,11 +221,15 @@ function buildRecordDataFromJson({ data, game }) {
       case ".lq.RecordHule":
         itemPayload.hules.forEach((x) => {
           assert(typeof x.seat === "number");
+          const fanIds = _.flatten(x.fans.map((f) => Array(f.val).fill(f.id)));
           curRound[x.seat].和 = [
             itemPayload.delta_scores[x.seat] - (x.liqi ? 1000 : 0),
-            _.flatten(x.fans.map((x) => Array(x.val).fill(x.id))),
+            fanIds,
             numDiscarded / numPlayers + 1,
           ];
+          if (x.liqi) {
+            curRound[x.seat].有効裏ドラ = calcEffectiveUraDora(fanIds, x.fu);
+          }
           if (!x.zimo && curRound[x.seat].和[0] < Math.max(0, x.point_rong - 1500)) {
             assert(itemPayload.hules.length >= 2);
             const info = itemPayload.hules.filter((other) => other.yiman && other.seat !== x.seat)[0];
@@ -401,7 +460,7 @@ async function importPaifu({ targetFiles = null } = {}) {
   console.log("importPaifu completed");
 }
 
-module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, isTargetGame };
+module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, isTargetGame, calcEffectiveUraDora };
 
 if (require.main === module) {
   importPaifu().catch((e) => {
