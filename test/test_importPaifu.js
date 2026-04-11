@@ -727,27 +727,27 @@ describe("calcEffectiveUraDora: 有効裏ドラ枚数の計算", () => {
     });
   });
 
-  describe("条件3: fu<60のとき、fans3→4に上がる裏ドラが有効", () => {
+  describe("条件3: fu<60のとき、fans4以下に上がる全裏ドラが有効", () => {
     test.each([
       {
-        name: "仕様例: fu=50, base=2, ura=2 → fans3→4の1枚が有効",
-        // Given
+        name: "fu=50, base=2, ura=2 → fans4以下まで2枚全て有効",
+        // Given: base=2, ura=2, fu=50 → min(2, 4-2)=2
         fanIds: buildFanIds([{ id: FAN_RIICHI, count: 2 }, { id: FAN_URA, count: 2 }]),
         fu: 50,
         // Then
-        expected: 1,
+        expected: 2,
       },
       {
-        name: "fu=60のとき条件3は適用されない",
-        // Given: base=2, ura=2, fu=60 → 条件3不適用、条件1も不適用（total=4<6）
-        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 2 }, { id: FAN_URA, count: 2 }]),
-        fu: 60,
+        name: "fu=50, base=1, ura=3 → fans4以下まで3枚全て有効",
+        // Given: base=1, ura=3, total=4, fu=50 → 条件3: min(3, 4-1)=3, 条件1: total=4<threshold6→0, max(0,3)=3
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 1 }, { id: FAN_URA, count: 3 }]),
+        fu: 50,
         // Then
-        expected: 0,
+        expected: 3,
       },
       {
         name: "fu<60でもbaseFans>=4のとき条件3は適用されない",
-        // Given: base=4, ura=1, fu=30 → すでに4fans以上なので3→4は発生しない
+        // Given: base=4, ura=1, fu=30 → すでに4fans以上なので条件3不適用
         fanIds: buildFanIds([{ id: FAN_RIICHI, count: 4 }, { id: FAN_URA, count: 1 }]),
         fu: 30,
         // Then
@@ -762,24 +762,71 @@ describe("calcEffectiveUraDora: 有効裏ドラ枚数の計算", () => {
     });
   });
 
-  describe("条件4: ツモ+平和役あり、fans4→5に上がる裏ドラが有効", () => {
+  describe("条件3': fu>=60のとき、fans3以下に上がる全裏ドラが有効", () => {
     test.each([
       {
-        name: "ツモ+平和あり、base=4, ura=1 → fans4→5の1枚が有効",
-        // Given
+        name: "fu=60, base=2, ura=2, total=4 → 条件3'適用: min(2, 3-2)=1",
+        // Given: base=2, ura=2, fu=60 → 条件3': min(2, 3-2)=1, 条件1: total=4<threshold6→0, max(0,1)=1
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 2 }, { id: FAN_URA, count: 2 }]),
+        fu: 60,
+        // Then
+        expected: 1,
+      },
+      {
+        name: "仕様例: fu=60, base=2, ura=5, total=7 → 条件1(4)が条件3'(1)より大きい",
+        // Given: base=2, ura=5, fu=60 → 条件3': min(5,3-2)=1, 条件1: total=7→threshold[6]→min(5,6-2)=4, max(4,1)=4
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 2 }, { id: FAN_URA, count: 5 }]),
+        fu: 60,
+        // Then
+        expected: 4,
+      },
+      {
+        name: "fu=60でもbaseFans>=3のとき条件3'は適用されない",
+        // Given: base=3, ura=1, fu=60 → 条件3'不適用、条件1: total=4<6→0
+        fanIds: buildFanIds([{ id: FAN_RIICHI, count: 3 }, { id: FAN_URA, count: 1 }]),
+        fu: 60,
+        // Then
+        expected: 0,
+      },
+    ])("$name", ({ fanIds, fu, expected }) => {
+      // When
+      const result = calcEffectiveUraDora(fanIds, fu);
+
+      // Then
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe("条件4: ツモ+平和役あり、fans5以下に上がる裏ドラが有効", () => {
+    test.each([
+      {
+        name: "ツモ+平和あり、base=4, ura=1 → fans5以下まで1枚有効",
+        // Given: base=4(riichi*2+tsumo+pinfu), ura=1, fu=60 → 条件3'不適用(base>=3), 条件4: min(1,5-4)=1
         fanIds: buildFanIds([
           { id: FAN_RIICHI, count: 2 },
           { id: FAN_TSUMO, count: 1 },
           { id: FAN_PINFU, count: 1 },
           { id: FAN_URA, count: 1 },
         ]),
-        fu: 30,
+        fu: 60,
         // Then
         expected: 1,
       },
       {
+        name: "ツモ+平和あり、base=2, ura=3 → fans5以下まで3枚有効",
+        // Given: base=2(tsumo+pinfu), ura=3, fu=60 → 条件3': min(3,3-2)=1, 条件4: min(3,5-2)=3, max(1,3)=3
+        fanIds: buildFanIds([
+          { id: FAN_TSUMO, count: 1 },
+          { id: FAN_PINFU, count: 1 },
+          { id: FAN_URA, count: 3 },
+        ]),
+        fu: 60,
+        // Then
+        expected: 3,
+      },
+      {
         name: "ツモのみ（平和なし）のとき条件4は適用されない",
-        // Given: base=4(riichi*3+tsumo), ura=1, fu=60 → 条件3不適用(fu>=60)、条件4不適用(平和なし)
+        // Given: base=4(riichi*3+tsumo), ura=1, fu=60 → 条件3'不適用(base>=3)、条件4不適用(平和なし)
         fanIds: buildFanIds([
           { id: FAN_RIICHI, count: 3 },
           { id: FAN_TSUMO, count: 1 },
@@ -791,7 +838,7 @@ describe("calcEffectiveUraDora: 有効裏ドラ枚数の計算", () => {
       },
       {
         name: "平和のみ（ツモなし）のとき条件4は適用されない",
-        // Given: base=4(riichi*3+pinfu), ura=1, fu=60 → 条件3不適用(fu>=60)、条件4不適用(ツモなし)
+        // Given: base=4(riichi*3+pinfu), ura=1, fu=60 → 条件3'不適用(base>=3)、条件4不適用(ツモなし)
         fanIds: buildFanIds([
           { id: FAN_RIICHI, count: 3 },
           { id: FAN_PINFU, count: 1 },

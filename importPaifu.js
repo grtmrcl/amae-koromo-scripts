@@ -48,22 +48,25 @@ function calcEffectiveUraDora(fanIds, fu) {
   // 条件2: 合計fans が 3 以下のとき、裏ドラ全て有効
   if (totalFans <= 3) return uraCount;
 
-  // 条件3: fu < 60 かつ fans が 3→4 になるときの裏ドラ
-  // 条件4: 役にツモと平和があるとき、fans が 4→5 になるときの裏ドラ
+  // 条件3: fu < 60 のとき fans が 4 以下に上がる全裏ドラ
+  // 条件3': fu >= 60 のとき fans が 3 以下に上がる全裏ドラ
+  // 条件4: 役にツモと平和があるとき、fans が 5 以下に上がる裏ドラ
   const hasTsumo = fanIds.includes(FAN_ID_TSUMO);
   const hasPinfu = fanIds.includes(FAN_ID_PINFU);
   let extraEffective = 0;
 
-  if (fu < 60 && baseFans < 4 && totalFans >= 4) {
-    // fans が 3→4 に上がる裏ドラ枚数（baseFansが3未満でも3に達した後の4への1枚のみ有効）
-    const neededFor4 = 4 - Math.max(baseFans, 3);
-    extraEffective = Math.min(uraCount, neededFor4);
+  if (fu < 60 && baseFans < 4) {
+    // fans が 4 以下に上がる全裏ドラ
+    extraEffective = Math.min(uraCount, 4 - baseFans);
+  } else if (fu >= 60 && baseFans < 3) {
+    // fans が 3 以下に上がる全裏ドラ
+    extraEffective = Math.min(uraCount, 3 - baseFans);
   }
 
-  if (hasTsumo && hasPinfu && baseFans < 5 && totalFans >= 5) {
-    // fans が 4→5 に上がる裏ドラ枚数（baseFansが4未満でも4に達した後の5への1枚のみ有効）
-    const neededFor5 = 5 - Math.max(baseFans, 4);
-    extraEffective = Math.max(extraEffective, Math.min(uraCount, neededFor5));
+  if (hasTsumo && hasPinfu && baseFans < 5) {
+    // fans が 5 以下に上がる裏ドラ
+    const neededFor5 = Math.min(uraCount, 5 - baseFans);
+    extraEffective = Math.max(extraEffective, neededFor5);
   }
 
   // 条件1: 裏ドラ除外fansが5以下/7/10/12のとき、裏ドラを加えると6/8/11/13に達する裏ドラ
