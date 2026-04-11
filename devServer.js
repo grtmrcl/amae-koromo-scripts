@@ -527,7 +527,20 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   const playedModes = [...new Set(
     allBasicDocs.map((doc) => (doc.standard_rule === 1 ? 1 : 2)).filter((m) => modes.includes(m))
   )];
+  const allExtDocs = Object.values(extDocsByDb).flat();
 
+  return res.json(buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes));
+});
+
+/**
+ * プレイヤー詳細統計を計算する純粋関数
+ * @param {object[]} allBasicDocs - basicDBから取得した全ドキュメント
+ * @param {object[]} allExtDocs - extendedDBから取得した全ドキュメント（全DBフラット）
+ * @param {number} playerId - プレイヤーID
+ * @param {number[]} playedModes - プレイ済みモードの配列
+ * @returns {object} 統計データ
+ */
+function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
   // extendedDB から取得した全ドキュメント
   let count = 0;
   let winCount = 0;
@@ -542,6 +555,7 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   let ryukyokuCount = 0;
   let ryukyokuTenpaiCount = 0;
   let richiWinCount = 0;
+  let richiTsumoCount = 0;
   let fuuroWinCount = 0;
   let richiRyukyokuCount = 0;
   let fuuroRyukyokuCount = 0;
@@ -595,11 +609,9 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
   const FAN_URA = 33;      // 裏ドラ
   const isYakuman = (id) => (id >= 35 && id <= 50) || (id >= 59 && id <= 64);
 
-  for (const db of dbNames) {
-    const extDocs = extDocsByDb[db] || [];
-    for (const doc of extDocs) {
-          const seat = doc.accounts?.indexOf(playerId);
-          if (seat === -1 || seat == null) continue;
+  for (const doc of allExtDocs) {
+    const seat = doc.accounts?.indexOf(playerId);
+    if (seat === -1 || seat == null) continue;
           let currentRenchan = 0;
           for (const kyoku of doc.data || []) {
             const p = kyoku[seat];
@@ -654,6 +666,7 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
               if (hasRichi) {
                 richiWinCount++;
                 richiWinPointSum += p["和"][0];
+                if (p["自摸"] === true) richiTsumoCount++;
                 if (fans.includes(FAN_IPPATSU)) ippatsuCount++;
                 if (fans.includes(FAN_URA)) uraCount++;
               }
@@ -731,11 +744,10 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
               }
               if (fuuro >= 1) fuuroRyukyokuCount++;
             }
-          } // end for kyoku
-        } // end for doc
-      } // end for db
+    } // end for kyoku
+  } // end for allExtDocs
 
-  return res.json({
+  return {
     count,
     win_rate: count > 0 ? winCount / count : 0,
     tsumo_rate: winCount > 0 ? tsumoCount / winCount : 0,
@@ -759,6 +771,7 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     riichi_deal_in_non_instant_rate: richiCount > 0 ? richiAfterRonNonInstantCount / richiCount : 0,
     call_deal_in_rate: fuuroCount > 0 ? fuuroAfterRonCount / fuuroCount : 0,
     riichi_win_rate: richiCount > 0 ? richiWinCount / richiCount : 0,
+    riichi_tsumo_rate: richiWinCount > 0 ? richiTsumoCount / richiWinCount : 0,
     call_win_rate: fuuroCount > 0 ? fuuroWinCount / fuuroCount : 0,
     riichi_draw_rate: richiCount > 0 ? richiRyukyokuCount / richiCount : 0,
     call_draw_rate: fuuroCount > 0 ? fuuroRyukyokuCount / fuuroCount : 0,
@@ -791,8 +804,8 @@ router.get("/v2/:type/player_extended_stats/:playerId/:startDate/:endDate", asyn
     avg_start_shanten_non_dealer: shantenKoCount > 0 ? shantenKoSum / shantenKoCount : 0,
     account_id: playerId,
     played_modes: playedModes,
-  });
-});
+  };
+}
 
 // POST: player_stats (FilteredPlayerDataLoader が使用)
 router.post("/v2/:type/player_stats/:playerId", (req, res) => {
@@ -877,7 +890,7 @@ app.use("/api/", router);
 app.use("/api-test/", router);
 app.use("/", router);
 
-module.exports = { buildRonStatsOutput, buildRonStatsSelector };
+module.exports = { buildRonStatsOutput, buildRonStatsSelector, buildExtendedStats };
 
 if (require.main === module) {
   const port = parseInt(process.env.PORT, 10) || 3000;

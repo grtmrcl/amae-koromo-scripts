@@ -8,7 +8,7 @@ jest.mock("../env", () => ({
   COUCHDB_URL: "http://admin:password@localhost:5984/majsoul",
 }));
 
-const { buildRonStatsOutput, buildRonStatsSelector } = require("../devServer");
+const { buildRonStatsOutput, buildRonStatsSelector, buildExtendedStats } = require("../devServer");
 
 // テスト用ヘルパー: 空の state オブジェクト（全巡目空）
 const emptyCats = { honor: {}, terminals: {}, "near-terminals": {}, middle: {}, inner: {}, five: {} };
@@ -249,5 +249,77 @@ describe("放銃統計クエリの日付条件構築", () => {
     } else {
       expect(result).toEqual(expected);
     }
+  });
+});
+
+// ── buildExtendedStats: riichi_tsumo_rate ───────────────────────
+
+/**
+ * テスト用の最小限の局データを生成するヘルパー
+ * @param {object} playerData - seat 0 のプレイヤーデータ
+ * @returns {object[]} 局データ（1局・2人分）
+ */
+function makeKyoku(playerData) {
+  return [playerData, {}];
+}
+
+describe("立直ツモ率の計算", () => {
+  test.each([
+    {
+      name: "立直和了がない場合は riichi_tsumo_rate が 0 になる",
+      // Given: 和了なし
+      extDoc: { accounts: [1001], data: [makeKyoku({})] },
+      // Then
+      expected: 0,
+    },
+    {
+      name: "立直ツモあり: riichi_tsumo_rate = 立直ツモ回数 / 立直和了回数",
+      // Given: 立直かつ自摸和了
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 立直: 3, 和: [8000, [], 5], 自摸: true })],
+      },
+      // Then: 1 / 1 = 1.0
+      expected: 1.0,
+    },
+    {
+      name: "立直ロン和了のみ: riichi_tsumo_rate = 0",
+      // Given: 立直だが自摸ではない（ロン和了）
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 立直: 2, 和: [5800, [], 4] })],
+      },
+      // Then: 0 / 1 = 0
+      expected: 0,
+    },
+    {
+      name: "立直ツモ1回・立直ロン1回: riichi_tsumo_rate = 0.5",
+      // Given: 立直ツモ1局 + 立直ロン1局
+      extDoc: {
+        accounts: [1001],
+        data: [
+          makeKyoku({ 立直: 3, 和: [8000, [], 5], 自摸: true }),
+          makeKyoku({ 立直: 2, 和: [5800, [], 4] }),
+        ],
+      },
+      // Then: 1 / 2 = 0.5
+      expected: 0.5,
+    },
+    {
+      name: "門前ツモ（立直なし）は riichi_tsumo_rate に含まれない",
+      // Given: 立直なしのツモ和了
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 和: [2000, [], 3], 自摸: true })],
+      },
+      // Then: 立直和了 0 回なので 0
+      expected: 0,
+    },
+  ])("$name", ({ extDoc, expected }) => {
+    // When
+    const result = buildExtendedStats([], [extDoc], 1001, []);
+
+    // Then
+    expect(result.riichi_tsumo_rate).toBe(expected);
   });
 });
