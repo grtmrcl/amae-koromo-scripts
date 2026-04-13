@@ -109,20 +109,22 @@ function indicatedToActualDora(indicatedTile) {
 
 /**
  * 配牌にドラが何枚含まれるかを返す。
- * ドラ表示牌リストから実際のドラ牌セットを求め、手牌と照合する。
- * 赤牌 (0m/0p/0s) は対応する5牌 (5m/5p/5s) と同じドラ判定をする。
- * 例: ドラ表示牌4sのとき、手牌に5sと0sと5sがあれば3枚とカウントする。
+ * 通常ドラ（ドラ表示牌から決まる5牌）と赤ドラ（0m/0p/0s）の合計枚数を返す。
+ * 赤牌はドラ判定（5牌として照合）と赤ドラとして両方カウントされる。
+ * 例: ドラ表示牌4sのとき、手牌に5s・0s・5sがあれば通常ドラ3枚+赤1枚=4枚。
  *
  * @param {string[]} tiles - 手牌
  * @param {string[]} doraIndicators - ドラ表示牌リスト
- * @returns {number} 手牌中のドラ枚数
+ * @returns {number} 手牌中のドラ枚数（通常ドラ + 赤ドラの合計）
  */
 function countHaipaiDora(tiles, doraIndicators) {
   const doraSet = doraIndicators.map(indicatedToActualDora);
   let count = 0;
   for (const tile of tiles) {
-    const normalized = tile[0] === "0" ? `5${tile[1]}` : tile;
+    const isAka = tile[0] === "0";
+    const normalized = isAka ? `5${tile[1]}` : tile;
     if (doraSet.includes(normalized)) count++;
+    if (isAka) count++; // 赤ドラは追加で1枚
   }
   return count;
 }

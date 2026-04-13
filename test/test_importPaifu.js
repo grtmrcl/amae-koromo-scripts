@@ -1067,28 +1067,28 @@ describe("配牌中のドラ枚数カウント", () => {
       expected: 1,
     },
     {
-      name: "赤牌(0s)はドラ(5s)と同じ判定でカウントする",
-      // Given: ドラ表示牌4s→ドラ5s、手牌に赤五索(0s)あり
+      name: "赤牌(0s)はドラ判定1枚+赤ドラ1枚で2枚カウントする",
+      // Given: ドラ表示牌4s→ドラ5s、手牌に赤五索(0s)のみ
       tiles: ["0s", "1m", "2p"],
       doraIndicators: ["4s"],
-      // Then
-      expected: 1,
-    },
-    {
-      name: "赤牌(0s)と通常の5s両方あるときそれぞれドラとして2枚カウントする",
-      // Given: ドラ表示牌4s→ドラ5s、手牌に0sと5sの両方（5sと0sは重複しない別枚）
-      tiles: ["0s", "5s", "1m"],
-      doraIndicators: ["4s"],
-      // Then
+      // Then: 通常ドラ1枚 + 赤1枚 = 2
       expected: 2,
     },
     {
-      name: "赤牌(0s)・5s・5sの3枚が全てドラとして3枚カウントする",
+      name: "赤牌(0s)と5sがあるとき通常ドラ2枚+赤1枚で3枚カウントする",
+      // Given: ドラ表示牌4s→ドラ5s、手牌に0sと5s
+      tiles: ["0s", "5s", "1m"],
+      doraIndicators: ["4s"],
+      // Then: 通常ドラ2枚 + 赤1枚 = 3
+      expected: 3,
+    },
+    {
+      name: "赤牌(0s)・5s・5sがあるとき通常ドラ3枚+赤1枚で4枚カウントする",
       // Given: ドラ表示牌4s→ドラ5s、手牌に0sと5s2枚
       tiles: ["0s", "5s", "5s"],
       doraIndicators: ["4s"],
-      // Then
-      expected: 3,
+      // Then: 通常ドラ3枚 + 赤1枚 = 4
+      expected: 4,
     },
     {
       name: "複数のドラ表示牌に対して正しくカウントする",
