@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, calcEffectiveUraDora } = require("../importPaifu");
+const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, calcEffectiveUraDora, indicatedToActualDora, countHaipaiDora } = require("../importPaifu");
 const { CouchStorage, MODE_GAME } = require("../couchStorage");
 const { RonStatsAccumulator, PLAYER_STATES, TILE_CATEGORIES } = require("../ronStats");
 
@@ -613,6 +613,138 @@ describe("importPaifu の targetFiles オプション", () => {
   });
 });
 
+describe("importPaifu の除外ファイル移動処理", () => {
+  let mockReadFileSync;
+  let mockReaddirSync;
+  let mockRenameSync;
+  let mockMkdirSync;
+
+  function setupMocksWithFs() {
+    jest.resetModules();
+    mockReadFileSync = jest.fn();
+    mockReaddirSync = jest.fn().mockReturnValue([]);
+    mockRenameSync = jest.fn();
+    mockMkdirSync = jest.fn();
+    jest.mock("../couchStorage", () => {
+      const MockCouchStorage = jest.fn().mockImplementation(() => ({
+        destroyDatabases: jest.fn().mockResolvedValue(undefined),
+        ensureIndexes: jest.fn().mockResolvedValue(undefined),
+        findNonExistentRecordsFast: jest.fn().mockResolvedValue([{ uuid: "dummy" }]),
+        saveGame: jest.fn().mockResolvedValue(undefined),
+        saveRoundData: jest.fn().mockResolvedValue(undefined),
+        triggerViewRefresh: jest.fn().mockResolvedValue(undefined),
+      }));
+      MockCouchStorage.DEFAULT_MODE = "GAME";
+      return { CouchStorage: MockCouchStorage, MODE_GAME: "GAME" };
+    });
+    jest.mock("fs", () => ({
+      ...jest.requireActual("fs"),
+      readdirSync: mockReaddirSync,
+      readFileSync: mockReadFileSync,
+      renameSync: mockRenameSync,
+      mkdirSync: mockMkdirSync,
+    }));
+    process.env.PAIFU_EXCLUDE_DIR = "/tmp/paifu_exclude_test";
+    return require("../importPaifu");
+  }
+
+  afterEach(() => {
+    delete process.env.PAIFU_EXCLUDE_DIR;
+    delete process.env.TARGET_ACCOUNT_IDS;
+    jest.resetModules();
+    jest.restoreAllMocks();
+  });
+
+  function makeFileContent(category, accountIds) {
+    return JSON.stringify({
+      head: {
+        uuid: "dummy-uuid",
+        accounts: accountIds.map((id, i) => ({ account_id: id, seat: i })),
+        config: { category },
+        result: { players: [] },
+      },
+      data: { name: ".lq.GameDetailRecords", data: { records: [] } },
+    });
+  }
+
+  test("TARGET_ACCOUNT_IDSに含まれないアカウントのゲームファイルがpaifu_excludeに移動される", async () => {
+    // Given: TARGET_ACCOUNT_IDS=10,20 で、account_id=99 が含まれるゲームファイル
+    process.env.TARGET_ACCOUNT_IDS = "10,20";
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue(["220101-aaa.json"]);
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) {
+        return makeFileContent(1, [99, 10]);
+      }
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: ファイルが paifu_exclude ディレクトリに移動される
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      expect.stringContaining("220101-aaa.json"),
+      expect.stringContaining("220101-aaa.json")
+    );
+    expect(mockRenameSync.mock.calls[0][1]).toContain("paifu_exclude_test");
+  });
+
+  test("フレンドルーム戦以外（category !== 1）のゲームファイルがpaifu_excludeに移動される", async () => {
+    // Given: category=2（フレンドルーム戦以外）のゲームファイル
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue(["220101-aaa.json"]);
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) {
+        return makeFileContent(2, [10, 20]);
+      }
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: ファイルが paifu_exclude ディレクトリに移動される
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      expect.stringContaining("220101-aaa.json"),
+      expect.stringContaining("220101-aaa.json")
+    );
+    expect(mockRenameSync.mock.calls[0][1]).toContain("paifu_exclude_test");
+  });
+
+  test("targetFiles 指定時は除外対象でもファイルが移動されない", async () => {
+    // Given: category=2 のファイルを targetFiles で指定
+    const { importPaifu } = setupMocksWithFs();
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) {
+        return makeFileContent(2, [10, 20]);
+      }
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+
+    // When: targetFiles を指定して importPaifu を実行
+    await importPaifu({ targetFiles: ["220101-aaa.json"] });
+
+    // Then: renameSync は呼ばれない
+    expect(mockRenameSync).not.toHaveBeenCalled();
+  });
+
+  test("paifu_excludeディレクトリが存在しない場合でも自動作成されて正常動作する", async () => {
+    // Given: mkdirSync をモック（実際には作成しない）
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue([]);
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: mkdirSync が recursive: true で呼ばれる
+    expect(mockMkdirSync).toHaveBeenCalledWith(
+      expect.stringContaining("paifu_exclude_test"),
+      { recursive: true }
+    );
+  });
+});
+
 // fan ID 定数（importPaifu.js と対応）
 const FAN_URA = 33;    // 裏ドラ
 const FAN_TSUMO = 29;  // 門前清自摸和
@@ -882,5 +1014,95 @@ describe("calcEffectiveUraDora: 有効裏ドラ枚数の計算", () => {
       // Then
       expect(result).toBe(expected);
     });
+  });
+});
+
+// ── indicatedToActualDora ────────────────────────────────────────
+
+describe("ドラ表示牌から実際のドラ牌への変換", () => {
+  test.each([
+    { name: "数牌: 通常の次の数字", indicator: "5s", expected: "6s" },
+    { name: "数牌: 9の次は1に戻る", indicator: "9s", expected: "1s" },
+    { name: "数牌: 9m の次は 1m", indicator: "9m", expected: "1m" },
+    { name: "数牌: 赤牌(0)は5として扱い次は6", indicator: "0m", expected: "6m" },
+    { name: "字牌・風牌: 4z(北)の次は 1z(東)", indicator: "4z", expected: "1z" },
+    { name: "字牌・風牌: 1z(東)の次は 2z(南)", indicator: "1z", expected: "2z" },
+    { name: "字牌・三元牌: 7z(中)の次は 5z(白)", indicator: "7z", expected: "5z" },
+    { name: "字牌・三元牌: 5z(白)の次は 6z(発)", indicator: "5z", expected: "6z" },
+  ])("$name", ({ indicator, expected }) => {
+    // When
+    const result = indicatedToActualDora(indicator);
+
+    // Then
+    expect(result).toBe(expected);
+  });
+});
+
+// ── countHaipaiDora ──────────────────────────────────────────────
+
+describe("配牌中のドラ枚数カウント", () => {
+  test.each([
+    {
+      name: "ドラ表示牌なしのとき0を返す",
+      // Given
+      tiles: ["1m", "2m", "3m"],
+      doraIndicators: [],
+      // Then
+      expected: 0,
+    },
+    {
+      name: "手牌にドラが含まれないとき0を返す",
+      // Given: ドラ表示牌5s→ドラ6s、手牌に6sなし
+      tiles: ["1m", "2m", "3p"],
+      doraIndicators: ["5s"],
+      // Then
+      expected: 0,
+    },
+    {
+      name: "手牌に通常ドラが1枚含まれるとき1を返す",
+      // Given: ドラ表示牌5s→ドラ6s、手牌に6s1枚
+      tiles: ["6s", "1m", "2p"],
+      doraIndicators: ["5s"],
+      // Then
+      expected: 1,
+    },
+    {
+      name: "赤牌(0s)はドラ判定1枚+赤ドラ1枚で2枚カウントする",
+      // Given: ドラ表示牌4s→ドラ5s、手牌に赤五索(0s)のみ
+      tiles: ["0s", "1m", "2p"],
+      doraIndicators: ["4s"],
+      // Then: 通常ドラ1枚 + 赤1枚 = 2
+      expected: 2,
+    },
+    {
+      name: "赤牌(0s)と5sがあるとき通常ドラ2枚+赤1枚で3枚カウントする",
+      // Given: ドラ表示牌4s→ドラ5s、手牌に0sと5s
+      tiles: ["0s", "5s", "1m"],
+      doraIndicators: ["4s"],
+      // Then: 通常ドラ2枚 + 赤1枚 = 3
+      expected: 3,
+    },
+    {
+      name: "赤牌(0s)・5s・5sがあるとき通常ドラ3枚+赤1枚で4枚カウントする",
+      // Given: ドラ表示牌4s→ドラ5s、手牌に0sと5s2枚
+      tiles: ["0s", "5s", "5s"],
+      doraIndicators: ["4s"],
+      // Then: 通常ドラ3枚 + 赤1枚 = 4
+      expected: 4,
+    },
+    {
+      name: "複数のドラ表示牌に対して正しくカウントする",
+      // Given: ドラ表示牌2種、手牌に各1枚
+      tiles: ["6s", "2z", "1m"],
+      doraIndicators: ["5s", "1z"],
+      // Then
+      expected: 2,
+    },
+  ])("$name", ({ tiles, doraIndicators, expected }) => {
+    // When
+    const result = countHaipaiDora(tiles, doraIndicators);
+
+    // Then
+    expect(result).toBe(expected);
   });
 });

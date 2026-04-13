@@ -13,6 +13,7 @@ const { RonStatsCollector, RonStatsAccumulator } = require("./ronStats");
 CouchStorage.DEFAULT_MODE = MODE_GAME;
 
 const PAIFU_DIR = process.env.PAIFU_DIR || path.join(__dirname, "paifu");
+const PAIFU_EXCLUDE_DIR = process.env.PAIFU_EXCLUDE_DIR || path.join(__dirname, "paifu_exclude");
 
 // TARGET_ACCOUNT_IDS が設定されている場合、全参加者がその中に含まれるゲームのみ登録する
 const TARGET_ACCOUNT_IDS = process.env.TARGET_ACCOUNT_IDS
@@ -80,6 +81,52 @@ function calcEffectiveUraDora(fanIds, fu) {
   }
 
   return Math.max(condition1Effective, extraEffective);
+}
+
+/**
+ * ドラ表示牌からドラ牌を返す。
+ * 牌表記: 数字 + スート (m/p/s/z)。0 は赤五牌 (5 扱い)。
+ * 数牌: 9 の次は 1。字牌: 風牌 (1z-4z) は 4 の次 1、三元牌 (5z-7z) は 7 の次 5。
+ *
+ * @param {string} indicatedTile - ドラ表示牌 (例: "5s", "4z")
+ * @returns {string} ドラ牌 (例: "6s", "1z")
+ */
+function indicatedToActualDora(indicatedTile) {
+  const suit = indicatedTile[indicatedTile.length - 1];
+  let num = parseInt(indicatedTile[0], 10);
+  if (num === 0) num = 5; // 赤牌は5扱い
+  if (suit === "z") {
+    if (num <= 4) {
+      num = num === 4 ? 1 : num + 1;
+    } else {
+      num = num === 7 ? 5 : num + 1;
+    }
+  } else {
+    num = num === 9 ? 1 : num + 1;
+  }
+  return `${num}${suit}`;
+}
+
+/**
+ * 配牌にドラが何枚含まれるかを返す。
+ * 通常ドラ（ドラ表示牌から決まる5牌）と赤ドラ（0m/0p/0s）の合計枚数を返す。
+ * 赤牌はドラ判定（5牌として照合）と赤ドラとして両方カウントされる。
+ * 例: ドラ表示牌4sのとき、手牌に5s・0s・5sがあれば通常ドラ3枚+赤1枚=4枚。
+ *
+ * @param {string[]} tiles - 手牌
+ * @param {string[]} doraIndicators - ドラ表示牌リスト
+ * @returns {number} 手牌中のドラ枚数（通常ドラ + 赤ドラの合計）
+ */
+function countHaipaiDora(tiles, doraIndicators) {
+  const doraSet = doraIndicators.map(indicatedToActualDora);
+  let count = 0;
+  for (const tile of tiles) {
+    const isAka = tile[0] === "0";
+    const normalized = isAka ? `5${tile[1]}` : tile;
+    if (doraSet.includes(normalized)) count++;
+    if (isAka) count++; // 赤ドラは追加で1枚
+  }
+  return count;
 }
 
 // paifu/*.json の data フィールド（デコード済みJSON）からラウンドデータを生成する
@@ -156,6 +203,7 @@ function buildRecordDataFromJson({ data, game }) {
             : {}),
           手牌: itemPayload[`tiles${seat}`],
           起手向听: calcShanten(itemPayload[`tiles${seat}`]),
+          手牌ドラ枚数: countHaipaiDora(itemPayload[`tiles${seat}`], itemPayload.doras || []),
         }))
       );
       振听 = Array(rounds[rounds.length - 1].length).fill(false);
@@ -371,6 +419,8 @@ async function importPaifu({ targetFiles = null } = {}) {
   }
   console.log("CouchDB indexes ensured.");
 
+  fs.mkdirSync(PAIFU_EXCLUDE_DIR, { recursive: true });
+
   const files = targetFiles
     ? targetFiles.map((f) => (f.endsWith(".json") ? f : `${f}.json`))
     : fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
@@ -402,12 +452,28 @@ async function importPaifu({ targetFiles = null } = {}) {
 
     // 全参加者が TARGET_ACCOUNT_IDS に含まれないゲームはスキップ
     if (!isTargetGame(gameData)) {
+      if (!targetFiles) {
+        try {
+          fs.renameSync(filePath, path.join(PAIFU_EXCLUDE_DIR, file));
+          console.log(`Excluded (not target account): ${file}`);
+        } catch (e) {
+          console.error(`Failed to move ${file} to exclude dir:`, e);
+        }
+      }
       continue;
     }
 
     // category === 1（フレンドルーム戦）のみ取り込み対象
     const category = gameData.config.category;
     if (category !== 1) {
+      if (!targetFiles) {
+        try {
+          fs.renameSync(filePath, path.join(PAIFU_EXCLUDE_DIR, file));
+          console.log(`Excluded (category=${category}): ${file}`);
+        } catch (e) {
+          console.error(`Failed to move ${file} to exclude dir:`, e);
+        }
+      }
       continue;
     }
 
@@ -463,7 +529,7 @@ async function importPaifu({ targetFiles = null } = {}) {
   console.log("importPaifu completed");
 }
 
-module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, isTargetGame, calcEffectiveUraDora };
+module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, isTargetGame, calcEffectiveUraDora, indicatedToActualDora, countHaipaiDora };
 
 if (require.main === module) {
   importPaifu().catch((e) => {
