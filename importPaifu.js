@@ -13,6 +13,7 @@ const { RonStatsCollector, RonStatsAccumulator } = require("./ronStats");
 CouchStorage.DEFAULT_MODE = MODE_GAME;
 
 const PAIFU_DIR = process.env.PAIFU_DIR || path.join(__dirname, "paifu");
+const PAIFU_EXCLUDE_DIR = process.env.PAIFU_EXCLUDE_DIR || path.join(__dirname, "paifu_exclude");
 
 // TARGET_ACCOUNT_IDS が設定されている場合、全参加者がその中に含まれるゲームのみ登録する
 const TARGET_ACCOUNT_IDS = process.env.TARGET_ACCOUNT_IDS
@@ -371,6 +372,8 @@ async function importPaifu({ targetFiles = null } = {}) {
   }
   console.log("CouchDB indexes ensured.");
 
+  fs.mkdirSync(PAIFU_EXCLUDE_DIR, { recursive: true });
+
   const files = targetFiles
     ? targetFiles.map((f) => (f.endsWith(".json") ? f : `${f}.json`))
     : fs.readdirSync(PAIFU_DIR).filter((f) => /^\d{6}-.*\.json$/.test(f));
@@ -402,12 +405,28 @@ async function importPaifu({ targetFiles = null } = {}) {
 
     // 全参加者が TARGET_ACCOUNT_IDS に含まれないゲームはスキップ
     if (!isTargetGame(gameData)) {
+      if (!targetFiles) {
+        try {
+          fs.renameSync(filePath, path.join(PAIFU_EXCLUDE_DIR, file));
+          console.log(`Excluded (not target account): ${file}`);
+        } catch (e) {
+          console.error(`Failed to move ${file} to exclude dir:`, e);
+        }
+      }
       continue;
     }
 
     // category === 1（フレンドルーム戦）のみ取り込み対象
     const category = gameData.config.category;
     if (category !== 1) {
+      if (!targetFiles) {
+        try {
+          fs.renameSync(filePath, path.join(PAIFU_EXCLUDE_DIR, file));
+          console.log(`Excluded (category=${category}): ${file}`);
+        } catch (e) {
+          console.error(`Failed to move ${file} to exclude dir:`, e);
+        }
+      }
       continue;
     }
 

@@ -613,6 +613,138 @@ describe("importPaifu の targetFiles オプション", () => {
   });
 });
 
+describe("importPaifu の除外ファイル移動処理", () => {
+  let mockReadFileSync;
+  let mockReaddirSync;
+  let mockRenameSync;
+  let mockMkdirSync;
+
+  function setupMocksWithFs() {
+    jest.resetModules();
+    mockReadFileSync = jest.fn();
+    mockReaddirSync = jest.fn().mockReturnValue([]);
+    mockRenameSync = jest.fn();
+    mockMkdirSync = jest.fn();
+    jest.mock("../couchStorage", () => {
+      const MockCouchStorage = jest.fn().mockImplementation(() => ({
+        destroyDatabases: jest.fn().mockResolvedValue(undefined),
+        ensureIndexes: jest.fn().mockResolvedValue(undefined),
+        findNonExistentRecordsFast: jest.fn().mockResolvedValue([{ uuid: "dummy" }]),
+        saveGame: jest.fn().mockResolvedValue(undefined),
+        saveRoundData: jest.fn().mockResolvedValue(undefined),
+        triggerViewRefresh: jest.fn().mockResolvedValue(undefined),
+      }));
+      MockCouchStorage.DEFAULT_MODE = "GAME";
+      return { CouchStorage: MockCouchStorage, MODE_GAME: "GAME" };
+    });
+    jest.mock("fs", () => ({
+      ...jest.requireActual("fs"),
+      readdirSync: mockReaddirSync,
+      readFileSync: mockReadFileSync,
+      renameSync: mockRenameSync,
+      mkdirSync: mockMkdirSync,
+    }));
+    process.env.PAIFU_EXCLUDE_DIR = "/tmp/paifu_exclude_test";
+    return require("../importPaifu");
+  }
+
+  afterEach(() => {
+    delete process.env.PAIFU_EXCLUDE_DIR;
+    delete process.env.TARGET_ACCOUNT_IDS;
+    jest.resetModules();
+    jest.restoreAllMocks();
+  });
+
+  function makeFileContent(category, accountIds) {
+    return JSON.stringify({
+      head: {
+        uuid: "dummy-uuid",
+        accounts: accountIds.map((id, i) => ({ account_id: id, seat: i })),
+        config: { category },
+        result: { players: [] },
+      },
+      data: { name: ".lq.GameDetailRecords", data: { records: [] } },
+    });
+  }
+
+  test("TARGET_ACCOUNT_IDSに含まれないアカウントのゲームファイルがpaifu_excludeに移動される", async () => {
+    // Given: TARGET_ACCOUNT_IDS=10,20 で、account_id=99 が含まれるゲームファイル
+    process.env.TARGET_ACCOUNT_IDS = "10,20";
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue(["220101-aaa.json"]);
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) {
+        return makeFileContent(1, [99, 10]);
+      }
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: ファイルが paifu_exclude ディレクトリに移動される
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      expect.stringContaining("220101-aaa.json"),
+      expect.stringContaining("220101-aaa.json")
+    );
+    expect(mockRenameSync.mock.calls[0][1]).toContain("paifu_exclude_test");
+  });
+
+  test("フレンドルーム戦以外（category !== 1）のゲームファイルがpaifu_excludeに移動される", async () => {
+    // Given: category=2（フレンドルーム戦以外）のゲームファイル
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue(["220101-aaa.json"]);
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) {
+        return makeFileContent(2, [10, 20]);
+      }
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: ファイルが paifu_exclude ディレクトリに移動される
+    expect(mockRenameSync).toHaveBeenCalledWith(
+      expect.stringContaining("220101-aaa.json"),
+      expect.stringContaining("220101-aaa.json")
+    );
+    expect(mockRenameSync.mock.calls[0][1]).toContain("paifu_exclude_test");
+  });
+
+  test("targetFiles 指定時は除外対象でもファイルが移動されない", async () => {
+    // Given: category=2 のファイルを targetFiles で指定
+    const { importPaifu } = setupMocksWithFs();
+    mockReadFileSync.mockImplementation((filePath, _opts) => {
+      if (typeof filePath === "string" && filePath.endsWith(".json")) {
+        return makeFileContent(2, [10, 20]);
+      }
+      return jest.requireActual("fs").readFileSync(filePath, _opts);
+    });
+
+    // When: targetFiles を指定して importPaifu を実行
+    await importPaifu({ targetFiles: ["220101-aaa.json"] });
+
+    // Then: renameSync は呼ばれない
+    expect(mockRenameSync).not.toHaveBeenCalled();
+  });
+
+  test("paifu_excludeディレクトリが存在しない場合でも自動作成されて正常動作する", async () => {
+    // Given: mkdirSync をモック（実際には作成しない）
+    const { importPaifu } = setupMocksWithFs();
+    mockReaddirSync.mockReturnValue([]);
+
+    // When: importPaifu を実行
+    await importPaifu();
+
+    // Then: mkdirSync が recursive: true で呼ばれる
+    expect(mockMkdirSync).toHaveBeenCalledWith(
+      expect.stringContaining("paifu_exclude_test"),
+      { recursive: true }
+    );
+  });
+});
+
 // fan ID 定数（importPaifu.js と対応）
 const FAN_URA = 33;    // 裏ドラ
 const FAN_TSUMO = 29;  // 門前清自摸和
