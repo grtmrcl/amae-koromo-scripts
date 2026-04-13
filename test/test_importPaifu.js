@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, calcEffectiveUraDora } = require("../importPaifu");
+const { buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, calcEffectiveUraDora, indicatedToActualDora, countHaipaiDora } = require("../importPaifu");
 const { CouchStorage, MODE_GAME } = require("../couchStorage");
 const { RonStatsAccumulator, PLAYER_STATES, TILE_CATEGORIES } = require("../ronStats");
 
@@ -1014,5 +1014,87 @@ describe("calcEffectiveUraDora: 有効裏ドラ枚数の計算", () => {
       // Then
       expect(result).toBe(expected);
     });
+  });
+});
+
+// ── indicatedToActualDora ────────────────────────────────────────
+
+describe("ドラ表示牌から実際のドラ牌への変換", () => {
+  test.each([
+    { name: "数牌: 通常の次の数字", indicator: "5s", expected: "6s" },
+    { name: "数牌: 9の次は1に戻る", indicator: "9s", expected: "1s" },
+    { name: "数牌: 9m の次は 1m", indicator: "9m", expected: "1m" },
+    { name: "数牌: 赤牌(0)は5として扱い次は6", indicator: "0m", expected: "6m" },
+    { name: "字牌・風牌: 4z(北)の次は 1z(東)", indicator: "4z", expected: "1z" },
+    { name: "字牌・風牌: 1z(東)の次は 2z(南)", indicator: "1z", expected: "2z" },
+    { name: "字牌・三元牌: 7z(中)の次は 5z(白)", indicator: "7z", expected: "5z" },
+    { name: "字牌・三元牌: 5z(白)の次は 6z(発)", indicator: "5z", expected: "6z" },
+  ])("$name", ({ indicator, expected }) => {
+    // When
+    const result = indicatedToActualDora(indicator);
+
+    // Then
+    expect(result).toBe(expected);
+  });
+});
+
+// ── countHaipaiDora ──────────────────────────────────────────────
+
+describe("配牌中のドラ枚数カウント", () => {
+  test.each([
+    {
+      name: "ドラ表示牌なしのとき0を返す",
+      // Given
+      tiles: ["1m", "2m", "3m"],
+      doraIndicators: [],
+      // Then
+      expected: 0,
+    },
+    {
+      name: "手牌にドラが含まれないとき0を返す",
+      // Given: ドラ表示牌5s→ドラ6s、手牌に6sなし
+      tiles: ["1m", "2m", "3p"],
+      doraIndicators: ["5s"],
+      // Then
+      expected: 0,
+    },
+    {
+      name: "手牌に通常ドラが1枚含まれるとき1を返す",
+      // Given: ドラ表示牌5s→ドラ6s、手牌に6s1枚
+      tiles: ["6s", "1m", "2p"],
+      doraIndicators: ["5s"],
+      // Then
+      expected: 1,
+    },
+    {
+      name: "赤牌(0s)がドラ(5s)の場合も正しくカウントする",
+      // Given: ドラ表示牌4s→ドラ5s、手牌に赤五索(0s)あり
+      tiles: ["0s", "1m", "2p"],
+      doraIndicators: ["4s"],
+      // Then
+      expected: 1,
+    },
+    {
+      name: "赤牌(0s)と通常ドラ(5s)が両方あるとき2を返す",
+      // Given: ドラ表示牌4s→ドラ5s、手牌に0sと5sの両方
+      tiles: ["0s", "5s", "1m"],
+      doraIndicators: ["4s"],
+      // Then
+      expected: 2,
+    },
+    {
+      name: "複数のドラ表示牌に対して正しくカウントする",
+      // Given: ドラ表示牌2種、手牌に各1枚
+      tiles: ["6s", "2z", "1m"],
+      doraIndicators: ["5s", "1z"],
+      // Then
+      expected: 2,
+    },
+  ])("$name", ({ tiles, doraIndicators, expected }) => {
+    // When
+    const result = countHaipaiDora(tiles, doraIndicators);
+
+    // Then
+    expect(result).toBe(expected);
   });
 });

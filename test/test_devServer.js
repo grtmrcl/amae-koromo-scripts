@@ -384,6 +384,115 @@ describe('立直和了あたり有効裏ドラ枚数の計算', () => {
     expect(result.effective_uradora_per_riichi_win).toBe(expected);
   });
 });
+
+// ── buildExtendedStats: avg_haipai_dora ────────────────────────────
+
+describe("配牌ドラ枚数平均の計算", () => {
+  test.each([
+    {
+      name: "手牌ドラ枚数がない場合は avg_haipai_dora が 0 になる",
+      // Given: 手牌ドラ枚数フィールドなし
+      extDoc: { accounts: [1001], data: [makeKyoku({})] },
+      // Then
+      expected: 0,
+    },
+    {
+      name: "ドラ0枚の配牌1局: avg_haipai_dora = 0",
+      // Given: ドラ0枚
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 手牌ドラ枚数: 0 })],
+      },
+      // Then
+      expected: 0,
+    },
+    {
+      name: "ドラ2枚の配牌1局: avg_haipai_dora = 2",
+      // Given: 配牌にドラ2枚
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 手牌ドラ枚数: 2 })],
+      },
+      // Then
+      expected: 2,
+    },
+    {
+      name: "複数局の平均: (1 + 3) / 2 = 2",
+      // Given: 1枚の局と3枚の局
+      extDoc: {
+        accounts: [1001],
+        data: [
+          makeKyoku({ 手牌ドラ枚数: 1 }),
+          makeKyoku({ 手牌ドラ枚数: 3 }),
+        ],
+      },
+      // Then
+      expected: 2,
+    },
+  ])("$name", ({ extDoc, expected }) => {
+    // When
+    const result = buildExtendedStats([], [extDoc], 1001, []);
+
+    // Then
+    expect(result.avg_haipai_dora).toBe(expected);
+  });
+});
+
+// ── buildExtendedStats: dealer_rate ────────────────────────────
+
+describe("親局率の計算", () => {
+  test.each([
+    {
+      name: "局がない場合は dealer_rate が 0 になる",
+      // Given: 空データ
+      extDoc: { accounts: [1001], data: [] },
+      // Then
+      expected: 0,
+    },
+    {
+      name: "全局が子: dealer_rate = 0",
+      // Given: 親フラグなし（子局のみ）
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({}), makeKyoku({})],
+      },
+      // Then
+      expected: 0,
+    },
+    {
+      name: "全局が親: dealer_rate = 1",
+      // Given: 全局で亲フラグあり
+      extDoc: {
+        accounts: [1001],
+        data: [makeKyoku({ 亲: true }), makeKyoku({ 亲: true })],
+      },
+      // Then
+      expected: 1,
+    },
+    {
+      name: "4局中1局が親: dealer_rate = 0.25",
+      // Given: 親1局・子3局
+      extDoc: {
+        accounts: [1001],
+        data: [
+          makeKyoku({ 亲: true }),
+          makeKyoku({}),
+          makeKyoku({}),
+          makeKyoku({}),
+        ],
+      },
+      // Then
+      expected: 0.25,
+    },
+  ])("$name", ({ extDoc, expected }) => {
+    // When
+    const result = buildExtendedStats([], [extDoc], 1001, []);
+
+    // Then
+    expect(result.dealer_rate).toBe(expected);
+  });
+});
+
 // ── extended_stats キャッシュ ────────────────────────────��───────
 
 // fetchExtendedStatsDocs（axios使用）をモックして純粋にキャッシュ動作をテスト

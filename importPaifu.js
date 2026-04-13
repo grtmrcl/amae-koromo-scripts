@@ -83,6 +83,49 @@ function calcEffectiveUraDora(fanIds, fu) {
   return Math.max(condition1Effective, extraEffective);
 }
 
+/**
+ * ドラ表示牌からドラ牌を返す。
+ * 牌表記: 数字 + スート (m/p/s/z)。0 は赤五牌 (5 扱い)。
+ * 数牌: 9 の次は 1。字牌: 風牌 (1z-4z) は 4 の次 1、三元牌 (5z-7z) は 7 の次 5。
+ *
+ * @param {string} indicatedTile - ドラ表示牌 (例: "5s", "4z")
+ * @returns {string} ドラ牌 (例: "6s", "1z")
+ */
+function indicatedToActualDora(indicatedTile) {
+  const suit = indicatedTile[indicatedTile.length - 1];
+  let num = parseInt(indicatedTile[0], 10);
+  if (num === 0) num = 5; // 赤牌は5扱い
+  if (suit === "z") {
+    if (num <= 4) {
+      num = num === 4 ? 1 : num + 1;
+    } else {
+      num = num === 7 ? 5 : num + 1;
+    }
+  } else {
+    num = num === 9 ? 1 : num + 1;
+  }
+  return `${num}${suit}`;
+}
+
+/**
+ * 配牌にドラが何枚含まれるかを返す。
+ * ドラ表示牌リストから実際のドラ牌セットを求め、手牌と照合する。
+ * 赤牌 (0m/0p/0s) は対応するドラ牌 (5m/5p/5s) として扱う。
+ *
+ * @param {string[]} tiles - 手牌
+ * @param {string[]} doraIndicators - ドラ表示牌リスト
+ * @returns {number} 手牌中のドラ枚数
+ */
+function countHaipaiDora(tiles, doraIndicators) {
+  const doraSet = doraIndicators.map(indicatedToActualDora);
+  let count = 0;
+  for (const tile of tiles) {
+    const normalized = tile[0] === "0" ? `5${tile[1]}` : tile;
+    if (doraSet.includes(normalized)) count++;
+  }
+  return count;
+}
+
 // paifu/*.json の data フィールド（デコード済みJSON）からラウンドデータを生成する
 // index.js の buildRecordData に相当するが、Protobuf バイナリではなく JSON オブジェクトを受け取る
 function buildRecordDataFromJson({ data, game }) {
@@ -157,6 +200,7 @@ function buildRecordDataFromJson({ data, game }) {
             : {}),
           手牌: itemPayload[`tiles${seat}`],
           起手向听: calcShanten(itemPayload[`tiles${seat}`]),
+          手牌ドラ枚数: countHaipaiDora(itemPayload[`tiles${seat}`], itemPayload.doras || []),
         }))
       );
       振听 = Array(rounds[rounds.length - 1].length).fill(false);
@@ -482,7 +526,7 @@ async function importPaifu({ targetFiles = null } = {}) {
   console.log("importPaifu completed");
 }
 
-module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, isTargetGame, calcEffectiveUraDora };
+module.exports = { importPaifu, buildRecordDataFromJson, isStandardDetailRule, getStoreForFriend, isTargetGame, calcEffectiveUraDora, indicatedToActualDora, countHaipaiDora };
 
 if (require.main === module) {
   importPaifu().catch((e) => {
