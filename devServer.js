@@ -678,8 +678,10 @@ function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
   let shantenOyaCount = 0;
   let shantenKoSum = 0;
   let shantenKoCount = 0;
-  let haipaiDoraSum = 0;
-  let haipaiDoraCount = 0;
+  let haipaiDoraOyaSum = 0;
+  let haipaiDoraOyaCount = 0;
+  let haipaiDoraKoSum = 0;
+  let haipaiDoraKoCount = 0;
   let gameScoreSum = 0;
   let gameCount = 0;
 
@@ -741,8 +743,13 @@ function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
             }
             const haipaiDora = p["手牌ドラ枚数"];
             if (haipaiDora != null) {
-              haipaiDoraSum += haipaiDora;
-              haipaiDoraCount++;
+              if (isOya) {
+                haipaiDoraOyaSum += haipaiDora;
+                haipaiDoraOyaCount++;
+              } else {
+                haipaiDoraKoSum += haipaiDora;
+                haipaiDoraKoCount++;
+              }
             }
             const hasWin = p["和"] != null;
             const hasRichi = p["立直"] != null;
@@ -898,7 +905,8 @@ function buildExtendedStats(allBasicDocs, allExtDocs, playerId, playedModes) {
     avg_start_shanten: shantenOyaCount + shantenKoCount > 0 ? shantenSum / (shantenOyaCount + shantenKoCount) : 0,
     avg_start_shanten_dealer: shantenOyaCount > 0 ? shantenOyaSum / shantenOyaCount : 0,
     avg_start_shanten_non_dealer: shantenKoCount > 0 ? shantenKoSum / shantenKoCount : 0,
-    avg_haipai_dora: haipaiDoraCount > 0 ? haipaiDoraSum / haipaiDoraCount : 0,
+    avg_haipai_dora_dealer: haipaiDoraOyaCount > 0 ? haipaiDoraOyaSum / haipaiDoraOyaCount : 0,
+    avg_haipai_dora_non_dealer: haipaiDoraKoCount > 0 ? haipaiDoraKoSum / haipaiDoraKoCount : 0,
     dealer_rate: count > 0 ? oyaCount / count : 0,
     account_id: playerId,
     played_modes: playedModes,

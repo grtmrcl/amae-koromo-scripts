@@ -385,56 +385,58 @@ describe('立直和了あたり有効裏ドラ枚数の計算', () => {
   });
 });
 
-// ── buildExtendedStats: avg_haipai_dora ────────────────────────────
+// ── buildExtendedStats: avg_haipai_dora_dealer / avg_haipai_dora_non_dealer ──
 
-describe("配牌ドラ枚数平均の計算", () => {
+describe("配牌ドラ枚数平均の計算（親/子別）", () => {
   test.each([
     {
-      name: "手牌ドラ枚数がない場合は avg_haipai_dora が 0 になる",
+      name: "手牌ドラ枚数がない場合は親子ともに 0 になる",
       // Given: 手牌ドラ枚数フィールドなし
-      extDoc: { accounts: [1001], data: [makeKyoku({})] },
+      extDoc: { accounts: [1001], data: [makeKyoku({}), makeKyoku({ 亲: true })] },
       // Then
-      expected: 0,
+      expected: { dealer: 0, nonDealer: 0 },
     },
     {
-      name: "ドラ0枚の配牌1局: avg_haipai_dora = 0",
-      // Given: ドラ0枚
+      name: "親局のドラ枚数は avg_haipai_dora_dealer に集計される",
+      // Given: 親局でドラ2枚
       extDoc: {
         accounts: [1001],
-        data: [makeKyoku({ 手牌ドラ枚数: 0 })],
+        data: [makeKyoku({ 亲: true, 手牌ドラ枚数: 2 })],
       },
       // Then
-      expected: 0,
+      expected: { dealer: 2, nonDealer: 0 },
     },
     {
-      name: "ドラ2枚の配牌1局: avg_haipai_dora = 2",
-      // Given: 配牌にドラ2枚
+      name: "子局のドラ枚数は avg_haipai_dora_non_dealer に集計される",
+      // Given: 子局でドラ1枚
       extDoc: {
         accounts: [1001],
-        data: [makeKyoku({ 手牌ドラ枚数: 2 })],
+        data: [makeKyoku({ 手牌ドラ枚数: 1 })],
       },
       // Then
-      expected: 2,
+      expected: { dealer: 0, nonDealer: 1 },
     },
     {
-      name: "複数局の平均: (1 + 3) / 2 = 2",
-      // Given: 1枚の局と3枚の局
+      name: "親子混在時にそれぞれ独立して平均される",
+      // Given: 親局ドラ2枚・子局ドラ1枚・子局ドラ3枚
       extDoc: {
         accounts: [1001],
         data: [
+          makeKyoku({ 亲: true, 手牌ドラ枚数: 2 }),
           makeKyoku({ 手牌ドラ枚数: 1 }),
           makeKyoku({ 手牌ドラ枚数: 3 }),
         ],
       },
-      // Then
-      expected: 2,
+      // Then: dealer=2/1=2, nonDealer=(1+3)/2=2
+      expected: { dealer: 2, nonDealer: 2 },
     },
   ])("$name", ({ extDoc, expected }) => {
     // When
     const result = buildExtendedStats([], [extDoc], 1001, []);
 
     // Then
-    expect(result.avg_haipai_dora).toBe(expected);
+    expect(result.avg_haipai_dora_dealer).toBe(expected.dealer);
+    expect(result.avg_haipai_dora_non_dealer).toBe(expected.nonDealer);
   });
 });
 
