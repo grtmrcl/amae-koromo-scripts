@@ -110,7 +110,8 @@ function indicatedToActualDora(indicatedTile) {
 /**
  * 配牌にドラが何枚含まれるかを返す。
  * ドラ表示牌リストから実際のドラ牌セットを求め、手牌と照合する。
- * 赤牌 (0m/0p/0s) は対応するドラ牌 (5m/5p/5s) として扱う。
+ * 赤牌 (0m/0p/0s) は対応する5牌 (5m/5p/5s) と同じドラ判定をする。
+ * 例: ドラ表示牌4sのとき、手牌に5sと0sと5sがあれば3枚とカウントする。
  *
  * @param {string[]} tiles - 手牌
  * @param {string[]} doraIndicators - ドラ表示牌リスト
